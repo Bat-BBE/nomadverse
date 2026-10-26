@@ -515,7 +515,7 @@ export function Flowers({ count = 7000 }: { count?: number }) {
     };
     while (out.length < count) {
       // cluster centres, denser around the camp and toward the opening shot
-      const r = 7 + Math.pow(rnd(), 1.4) * 75;
+      const r = 38 + Math.pow(rnd(), 1.2) * 70; // keep the camp itself clear
       const a = rnd() * Math.PI * 2;
       const cx = Math.cos(a) * r;
       const cz = Math.sin(a) * r;

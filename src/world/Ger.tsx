@@ -342,21 +342,90 @@ function ArgalPile({ x, z }: { x: number; z: number }) {
   );
 }
 
-function MilkCans({ x, z }: { x: number; z: number }) {
+let staveTex: THREE.CanvasTexture | null = null;
+/** vertical wooden staves with grain, for the barrel and bucket */
+function staves() {
+  if (staveTex) return staveTex;
+  const cv = document.createElement('canvas');
+  cv.width = 256;
+  cv.height = 64;
+  const g = cv.getContext('2d')!;
+  for (let i = 0; i < 16; i++) {
+    const l = 0.85 + Math.random() * 0.25;
+    g.fillStyle = `rgb(${Math.round(150 * l)},${Math.round(104 * l)},${Math.round(62 * l)})`;
+    g.fillRect(i * 16, 0, 16, 64);
+    g.fillStyle = 'rgba(60,35,18,0.55)';
+    g.fillRect(i * 16, 0, 1.5, 64);
+    for (let k = 0; k < 5; k++) {
+      g.fillStyle = 'rgba(90,55,28,0.25)';
+      g.fillRect(i * 16 + 3 + Math.random() * 10, 0, 1, 64);
+    }
+  }
+  staveTex = new THREE.CanvasTexture(cv);
+  staveTex.wrapS = THREE.RepeatWrapping;
+  staveTex.colorSpace = THREE.SRGBColorSpace;
+  return staveTex;
+}
+
+/** Wooden barrel (торх) for water/milk with iron hoops, and a wooden bucket (хувин). */
+function WaterVessels({ x, z }: { x: number; z: number }) {
+  const geo = useMemo(() => {
+    // bulging barrel profile
+    const barrel = new THREE.LatheGeometry(
+      Array.from({ length: 9 }, (_, i) => {
+        const t = i / 8;
+        return new THREE.Vector2(0.22 + Math.sin(t * Math.PI) * 0.04, t * 0.62);
+      }),
+      24
+    );
+    const bucket = new THREE.LatheGeometry(
+      [
+        [0.13, 0.0],
+        [0.15, 0.3],
+        [0.155, 0.32],
+      ].map(([r, y]) => new THREE.Vector2(r, y)),
+      20
+    );
+    return { barrel, bucket };
+  }, []);
+  const wood = useMemo(() => new THREE.MeshStandardMaterial({ map: staves(), bumpMap: staves(), bumpScale: 0.5, roughness: 0.85, side: THREE.DoubleSide }), []);
+  const iron = useMemo(() => new THREE.MeshStandardMaterial({ color: '#3c3a38', roughness: 0.6, metalness: 0.6 }), []);
+  const lid = useMemo(() => new THREE.MeshStandardMaterial({ color: '#8a5e36', roughness: 0.8 }), []);
   return (
     <group position={[x, 0, z]}>
-      {[0, 0.42].map((dx) => (
-        <group key={dx} position-x={dx}>
-          <mesh position-y={0.32} castShadow>
-            <cylinderGeometry args={[0.18, 0.2, 0.64, 14]} />
-            <meshStandardMaterial color="#b9bec4" metalness={0.6} roughness={0.35} />
-          </mesh>
-          <mesh position-y={0.7}>
-            <cylinderGeometry args={[0.1, 0.16, 0.14, 14]} />
-            <meshStandardMaterial color="#9da3a9" metalness={0.6} roughness={0.35} />
-          </mesh>
-        </group>
+      {/* торх */}
+      <mesh geometry={geo.barrel} material={wood} castShadow receiveShadow />
+      {[0.08, 0.31, 0.54].map((y) => (
+        <mesh key={y} position-y={y} rotation-x={Math.PI / 2} material={iron}>
+          <torusGeometry args={[0.226 + Math.sin((y / 0.62) * Math.PI) * 0.04, 0.012, 4, 28]} />
+        </mesh>
       ))}
+      <mesh position-y={0.6} material={lid}>
+        <cylinderGeometry args={[0.215, 0.215, 0.03, 24]} />
+      </mesh>
+      {/* wooden ladle (шанага) resting on the lid */}
+      <mesh position={[0.05, 0.63, 0]} rotation-z={Math.PI / 2} material={lid}>
+        <cylinderGeometry args={[0.012, 0.012, 0.36, 6]} />
+      </mesh>
+      {/* хувин: wooden bucket with an iron hoop and rope handle */}
+      <group position={[0.5, 0, 0.15]}>
+        <mesh geometry={geo.bucket} material={wood} castShadow receiveShadow />
+        <mesh position-y={0.005} rotation-x={-Math.PI / 2} material={lid}>
+          <circleGeometry args={[0.13, 20]} />
+        </mesh>
+        <mesh position-y={0.24} rotation-x={Math.PI / 2} material={iron}>
+          <torusGeometry args={[0.15, 0.009, 4, 24]} />
+        </mesh>
+        <mesh position-y={0.32} rotation-y={Math.PI / 2}>
+          <torusGeometry args={[0.15, 0.008, 4, 16, Math.PI]} />
+          <meshStandardMaterial color="#b49a6a" roughness={0.9} />
+        </mesh>
+        {/* water inside */}
+        <mesh position-y={0.27} rotation-x={-Math.PI / 2}>
+          <circleGeometry args={[0.145, 20]} />
+          <meshStandardMaterial color="#4f6a6e" roughness={0.15} metalness={0.2} />
+        </mesh>
+      </group>
     </group>
   );
 }
@@ -483,7 +552,7 @@ export function Camp() {
       <Neighbour x={-52} z={62} rot={0.4} />
       <Cart position={[-6.5, 0, -2.5]} rot={0.6} />
       <ArgalPile x={LOC.argal.x} z={LOC.argal.z} />
-      <MilkCans x={3.6} z={3.4} />
+      <WaterVessels x={3.6} z={3.4} />
       <HitchLine />
     </group>
   );
@@ -510,13 +579,6 @@ export function Ovoo() {
     }
     return out;
   }, []);
-  const flags = useRef<THREE.Group>(null);
-  useFrame(({ clock }) => {
-    flags.current?.children.forEach((c, i) => {
-      c.rotation.z = 0.3 + Math.sin(clock.elapsedTime * 3 + i * 1.3) * 0.25;
-      c.rotation.y = (i / 6) * Math.PI * 2 + Math.sin(clock.elapsedTime * 2 + i) * 0.1;
-    });
-  });
   return (
     <group position={[x, y - 0.1, z]}>
       {stones.map((s, i) => (
@@ -531,21 +593,11 @@ export function Ovoo() {
           <meshLambertMaterial color="#c9c2b0" flatShading />
         </mesh>
       )}
-      {/* central pole with blue khadag streamers */}
+      {/* central wooden pole */}
       <mesh position-y={2.6} castShadow>
         <cylinderGeometry args={[0.05, 0.07, 2.6, 6]} />
         <meshLambertMaterial color="#7a5a3a" />
       </mesh>
-      <group ref={flags} position-y={3.6}>
-        {Array.from({ length: 6 }, (_, i) => (
-          <group key={i}>
-            <mesh position={[0.6, 0, 0]}>
-              <planeGeometry args={[1.2, 0.16]} />
-              <meshLambertMaterial color={i % 3 === 2 ? '#e8e2d2' : '#3b78c4'} side={THREE.DoubleSide} />
-            </mesh>
-          </group>
-        ))}
-      </group>
     </group>
   );
 }
