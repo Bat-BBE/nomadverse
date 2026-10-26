@@ -167,6 +167,7 @@ export function activeQuest(questsDone: QuestId[]) {
 export const world = {
   player: { x: 1.5, z: 7.5, y: 0, heading: 2.06, speed: 0 },
   horse: { x: 7.9, z: 3.5, heading: -Math.PI / 2, speed: 0 }, // tied facing the hitching line
+  dog: { x: -3.4, z: 4.6 },
   input: { x: 0, y: 0 }, // virtual joystick
   dragging: false,
   lastDrag: 0,

@@ -102,7 +102,7 @@ function useInteractables(): Interactable[] {
         },
       },
       { id: 'mother', r: 2.6, pos: () => LOC.mother, label: () => 'Ээжтэй ярилцах', use: () => g().setModal({ type: 'talk' }) },
-      { id: 'dog', r: 2.4, pos: () => ({ x: -3.4, z: 4.6 }), label: () => 'Банхар нохой', use: () => g().setModal({ type: 'info', id: 'dog' }) },
+      { id: 'dog', r: 2.4, pos: () => world.dog, label: () => 'Банхар нохой', use: () => g().setModal({ type: 'info', id: 'dog' }) },
       {
         id: 'gate',
         r: 2.2,
@@ -365,7 +365,6 @@ export function Player() {
     const blocked = (x: number, z: number) =>
       Math.hypot(x, z) < 3.75 || // ger
       Math.hypot(x - LOC.mother.x, z - LOC.mother.z) < 0.6 ||
-      Math.hypot(x + 3.4, z - 4.6) < 0.8 || // dog
       Math.hypot(x - 96, z - 8) < 3.9 || // neighbours
       Math.hypot(x + 52, z - 62) < 3.9 ||
       Math.hypot(x - LOC.ovoo.x, z - LOC.ovoo.z) < 2.0 ||
