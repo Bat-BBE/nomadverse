@@ -5,6 +5,7 @@ import * as THREE from 'three';
 import { doorTexture, feltTexture, roofTexture } from '@/game/textures';
 import { heightAt, LOC } from '@/game/terrain';
 import { useGame } from '@/game/store';
+import { addStatic, bodyCircles } from '@/game/colliders';
 
 export const GER = { r: 3.3, wall: 1.6, roofTop: 3.05, toono: 0.62 };
 
@@ -85,20 +86,85 @@ function Rope({ y, r, color = '#5e4a34' }: { y: number; r: number; color?: strin
 }
 
 /** Rope laid along the roof from the crown down to the eave, then down the wall. */
-function RoofRope({ angle }: { angle: number }) {
+/** Height of the roof felt at horizontal distance d from the ger's centre (matches the roof lathe). */
+function roofY(d: number) {
   const { r, wall, roofTop, toono } = GER;
+  const R1 = r + 0.28;
+  const R0 = toono + 0.06;
+  if (d <= R0) return roofTop + 0.12; // resting on the toono ring
+  const t = Math.min(1, Math.max(0, (R1 - d) / (R1 - R0)));
+  return wall - 0.06 + (roofTop - wall + 0.06) * t + Math.sin(t * Math.PI) * 0.08;
+}
+
+// өрх: the felt that covers the toono. It drapes over the crown and down the
+// roof, following its curve; the south part is folded back so smoke can escape.
+const ORKH = { x0: -1.15, x1: 1.15, z0: -1.65, z1: 0.12 };
+
+function OrkhCover() {
+  const geo = useMemo(() => {
+    const w = ORKH.x1 - ORKH.x0;
+    const h = ORKH.z1 - ORKH.z0;
+    const g = new THREE.PlaneGeometry(w, h, 36, 28);
+    g.rotateX(-Math.PI / 2);
+    g.translate((ORKH.x0 + ORKH.x1) / 2, 0, (ORKH.z0 + ORKH.z1) / 2);
+    const p = g.attributes.position as THREE.BufferAttribute;
+    const col = new Float32Array(p.count * 3);
+    const felt = new THREE.Color('#ebe3d2');
+    const blue = new THREE.Color('#2b5a93');
+    const c = new THREE.Color();
+    for (let i = 0; i < p.count; i++) {
+      const x = p.getX(i);
+      const z = p.getZ(i);
+      const d = Math.hypot(x, z);
+      // drape: over the opening the felt sags a little between the ring edges
+      const sag = d < GER.toono ? -0.04 * (1 - (d / GER.toono) ** 2) : 0;
+      p.setY(i, roofY(d) + 0.035 + sag);
+      // blue border band along the edges, slight weathering inside
+      const edge = Math.min(x - ORKH.x0, ORKH.x1 - x, z - ORKH.z0, ORKH.z1 - z);
+      c.copy(felt).multiplyScalar(0.94 + Math.sin(x * 9 + z * 7) * 0.03);
+      if (edge < 0.09) c.copy(blue);
+      col.set([c.r, c.g, c.b], i * 3);
+    }
+    g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+    g.computeVertexNormals();
+    return g;
+  }, []);
+  // the folded-back south flap: a narrow doubled strip lying along the open edge
+  const flap = useMemo(() => {
+    const g = new THREE.PlaneGeometry(ORKH.x1 - ORKH.x0, 0.32, 36, 3);
+    g.rotateX(-Math.PI / 2);
+    g.translate(0, 0, ORKH.z1 - 0.2);
+    const p = g.attributes.position as THREE.BufferAttribute;
+    for (let i = 0; i < p.count; i++) p.setY(i, roofY(Math.hypot(p.getX(i), p.getZ(i))) + 0.07);
+    g.computeVertexNormals();
+    return g;
+  }, []);
+  return (
+    <group>
+      <mesh geometry={geo} castShadow receiveShadow>
+        <meshStandardMaterial vertexColors roughness={0.95} side={THREE.DoubleSide} />
+      </mesh>
+      <mesh geometry={flap} castShadow>
+        <meshStandardMaterial color="#e2d9c6" roughness={0.95} side={THREE.DoubleSide} />
+      </mesh>
+    </group>
+  );
+}
+
+function RoofRope({ angle, start }: { angle: number; start?: number }) {
+  const { r, wall, toono } = GER;
   const geo = useMemo(() => {
     const pts: THREE.Vector3[] = [];
+    const r0 = start ?? toono + 0.15;
     for (let i = 0; i <= 12; i++) {
       const t = i / 12;
-      const rr = toono + 0.15 + (r + 0.3 - toono - 0.15) * t;
-      const y = roofTop + 0.06 - (roofTop - wall) * t + Math.sin(t * Math.PI) * 0.1;
-      pts.push(new THREE.Vector3(Math.cos(angle) * rr, y, Math.sin(angle) * rr));
+      const rr = r0 + (r + 0.3 - r0) * t;
+      pts.push(new THREE.Vector3(Math.cos(angle) * rr, roofY(rr) + 0.05, Math.sin(angle) * rr));
     }
     pts.push(new THREE.Vector3(Math.cos(angle) * (r + 0.13), wall - 0.25, Math.sin(angle) * (r + 0.13)));
     pts.push(new THREE.Vector3(Math.cos(angle) * (r + 0.1), 0.45, Math.sin(angle) * (r + 0.1)));
     return new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 28, 0.02, 4);
-  }, [angle, r, wall, roofTop, toono]);
+  }, [angle, start, r, wall, toono]);
   return (
     <mesh geometry={geo} castShadow>
       <meshLambertMaterial color="#5e4a34" />
@@ -106,41 +172,28 @@ function RoofRope({ angle }: { angle: number }) {
   );
 }
 
-/** The painted double door: two leaves hinged at the frame, opening outward (south). */
+/** The painted door: one leaf hinged on the west side, swinging outward (south). */
 function DoorLeaves() {
   const open = useGame((s) => s.doorOpen);
-  const left = useRef<THREE.Group>(null);
-  const right = useRef<THREE.Group>(null);
-  const halves = useMemo(
-    () =>
-      [0, 0.5].map((off) => {
-        const t = doorTexture().clone();
-        t.repeat.set(0.5, 1);
-        t.offset.set(off, 0);
-        t.needsUpdate = true;
-        return new THREE.MeshLambertMaterial({ map: t });
-      }),
-    []
-  );
+  const leaf = useRef<THREE.Group>(null);
   useFrame((_, dt) => {
-    const target = open ? 1.45 : 0;
-    const k = Math.min(1, dt * 5);
-    if (left.current) left.current.rotation.y += (-target - left.current.rotation.y) * k;
-    if (right.current) right.current.rotation.y += (target - right.current.rotation.y) * k;
+    const target = open ? -1.5 : 0;
+    if (leaf.current) leaf.current.rotation.y += (target - leaf.current.rotation.y) * Math.min(1, dt * 5);
   });
   return (
-    <>
-      <group ref={left} position={[-0.46, 0.8, 0.118]}>
-        <mesh position-x={0.23} material={halves[0]} castShadow>
-          <boxGeometry args={[0.46, 1.44, 0.025]} />
+    <group ref={leaf} position={[-0.46, 0.8, 0.118]}>
+      <mesh position-x={0.46} castShadow>
+        <boxGeometry args={[0.92, 1.44, 0.03]} />
+        <meshLambertMaterial map={doorTexture()} />
+      </mesh>
+      {/* iron hinges */}
+      {[0.5, -0.5].map((y) => (
+        <mesh key={y} position={[0.06, y, 0.02]}>
+          <boxGeometry args={[0.14, 0.04, 0.01]} />
+          <meshStandardMaterial color="#2c2a28" metalness={0.6} roughness={0.5} />
         </mesh>
-      </group>
-      <group ref={right} position={[0.46, 0.8, 0.118]}>
-        <mesh position-x={-0.23} material={halves[1]} castShadow>
-          <boxGeometry args={[0.46, 1.44, 0.025]} />
-        </mesh>
-      </group>
-    </>
+      ))}
+    </group>
   );
 }
 
@@ -201,19 +254,15 @@ export function GerExterior({ position = [0, 0, 0] as [number, number, number], 
         <torusGeometry args={[toono, 0.08, 6, 32]} />
         <meshLambertMaterial color="#b44e1c" />
       </mesh>
-      {/* өрх: square top cover, folded half open on the south side */}
-      <group position-y={roofTop + 0.1}>
-        <mesh position={[0, 0, -0.3]} rotation-x={-0.08} castShadow>
-          <boxGeometry args={[1.9, 0.03, 1.3]} />
-          <meshLambertMaterial color="#ece4d4" />
-        </mesh>
-        <mesh position={[0, 0.03, 0.32]} rotation-x={-0.08}>
-          <boxGeometry args={[1.94, 0.02, 0.08]} />
-          <meshLambertMaterial color="#2f5f9a" />
-        </mesh>
-      </group>
-      {[0.6, 2.55, 3.75, 5.65].map((a) => (
-        <RoofRope key={a} angle={a} />
+      {/* өрх lying on the roof, its four corners tied down with ropes */}
+      <OrkhCover />
+      {[
+        [ORKH.x1, ORKH.z1],
+        [ORKH.x0, ORKH.z1],
+        [ORKH.x0, ORKH.z0],
+        [ORKH.x1, ORKH.z0],
+      ].map(([cx, cz]) => (
+        <RoofRope key={`${cx},${cz}`} angle={Math.atan2(cz, cx)} start={Math.hypot(cx, cz) - 0.02} />
       ))}
       {/* chimney */}
       <mesh position={[0.25, roofTop + 0.45, 0.3]} castShadow>
@@ -369,6 +418,7 @@ function staves() {
 
 /** Wooden barrel (торх) for water/milk with iron hoops, and a wooden bucket (хувин). */
 function WaterVessels({ x, z }: { x: number; z: number }) {
+  const carrying = useGame((s) => (s.inventory.bucket ?? 0) > 0 || (s.inventory.milk ?? 0) > 0);
   const geo = useMemo(() => {
     // bulging barrel profile
     const barrel = new THREE.LatheGeometry(
@@ -407,8 +457,8 @@ function WaterVessels({ x, z }: { x: number; z: number }) {
       <mesh position={[0.05, 0.63, 0]} rotation-z={Math.PI / 2} material={lid}>
         <cylinderGeometry args={[0.012, 0.012, 0.36, 6]} />
       </mesh>
-      {/* хувин: wooden bucket with an iron hoop and rope handle */}
-      <group position={[0.5, 0, 0.15]}>
+      {/* хувин: wooden bucket with an iron hoop and rope handle (gone while you carry it) */}
+      <group position={[0.5, 0, 0.15]} visible={!carrying}>
         <mesh geometry={geo.bucket} material={wood} castShadow receiveShadow />
         <mesh position-y={0.005} rotation-x={-Math.PI / 2} material={lid}>
           <circleGeometry args={[0.13, 20]} />
@@ -543,10 +593,56 @@ function Neighbour({ x, z, rot }: { x: number; z: number; rot: number }) {
   );
 }
 
+/** Тавиур on the roof with aaruul drying in the sun (after the dairy activity). */
+function AaruulRack() {
+  const show = useGame((s) => s.activitiesDone.includes('aaruul'));
+  const pieces = useMemo(
+    () => Array.from({ length: 24 }, (_, i) => [((i % 6) - 2.5) * 0.11, Math.floor(i / 6) * 0.11 - 0.17, (i * 7) % 3] as [number, number, number]),
+    []
+  );
+  if (!show) return null;
+  const a = Math.PI / 4; // south-east, in the sun
+  return (
+    <group rotation-y={-a}>
+      <group position={[2.25, 2.36, 0]} rotation-z={-0.47}>
+        <mesh>
+          <boxGeometry args={[0.8, 0.03, 0.55]} />
+          <meshStandardMaterial color="#9a7a50" roughness={0.8} />
+        </mesh>
+        {pieces.map(([px, pz, r], i) => (
+          <mesh key={i} position={[px, 0.03, pz]} rotation-y={r}>
+            <boxGeometry args={[0.07, 0.025, 0.05]} />
+            <meshStandardMaterial color="#efe3c2" roughness={0.9} />
+          </mesh>
+        ))}
+      </group>
+    </group>
+  );
+}
+
+// register the camp's solid props once
+let campRegistered = false;
+function registerCamp() {
+  if (campRegistered) return;
+  campRegistered = true;
+  const { x: hx, z: hz } = LOC.hitch;
+  addStatic([
+    { x: hx, z: hz - 1.8, r: 0.15 },
+    { x: hx, z: hz + 1.8, r: 0.15 },
+    ...bodyCircles(-6.5, -2.5, 0.6, 0.75, 0.75, 3), // cart bed
+    { x: -6.5 + Math.sin(0.6) * 2.3, z: -2.5 + Math.cos(0.6) * 2.3, r: 0.35 }, // its shafts
+    { x: LOC.argal.x, z: LOC.argal.z, r: 0.55 },
+    { x: 3.6, z: 3.4, r: 0.32 }, // торх
+    { x: 4.1, z: 3.55, r: 0.2 }, // хувин
+  ]);
+}
+
 export function Camp() {
+  registerCamp();
   return (
     <group>
       <GerExterior main />
+      <AaruulRack />
       <Pen cx={-15} cz={-9} r={5.5} />
       <Neighbour x={96} z={8} rot={-0.3} />
       <Neighbour x={-52} z={62} rot={0.4} />

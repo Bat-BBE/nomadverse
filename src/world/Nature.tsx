@@ -4,6 +4,7 @@ import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { fbm, heightAt, LOC, riverDistance, riverZ, WATER_Y, WORLD_SIZE } from '@/game/terrain';
 import { world } from '@/game/store';
+import { addStatic } from '@/game/colliders';
 import { env } from '@/game/tod';
 import { cloudPuff } from './Ger';
 import { stoneTexture } from '@/game/textures';
@@ -445,6 +446,7 @@ export function Scatter() {
         q.setFromEuler(e);
         m.compose(v.set(x, heightAt(x, z) + s * 0.2, z), q, sc.set(s * (1 + rnd()), s * 0.75, s));
         rocks.push(m.clone());
+        if (s > 0.35) addStatic({ x, z, r: Math.max(sc.x, sc.z) * 0.85 });
       }
     }
     // a few lone stones in the grass

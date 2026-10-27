@@ -4,7 +4,7 @@ import { Canvas, useThree } from '@react-three/fiber';
 import { Bloom, BrightnessContrast, EffectComposer, N8AO, ToneMapping, Vignette } from '@react-three/postprocessing';
 import { ToneMappingMode } from 'postprocessing';
 import * as THREE from 'three';
-import { useGame, world } from '@/game/store';
+import { getQuality, useGame, world } from '@/game/store';
 import { bindKeys } from '@/game/input';
 import { Lights, Sky } from '@/world/Sky';
 import { Mountains, Terrain } from '@/world/Terrain';
@@ -13,8 +13,10 @@ import { Camp, Ovoo } from '@/world/Ger';
 import { Camels, Flock, PastureHorses } from '@/world/Animals';
 import { cam, Player } from '@/world/Player';
 import { Interior } from '@/world/Interior';
-import { Mother } from '@/world/Npc';
-import { Dog, Herder } from '@/world/Life';
+import { icam } from '@/world/InteriorPlayer';
+import { Villagers } from '@/world/Npc';
+import { Cattle, Herd, herd } from '@/world/Livestock';
+import { Dog, Eagle, Herder } from '@/world/Life';
 import { Director } from '@/world/Director';
 import { Overlay } from '@/ui/Overlay';
 
@@ -44,9 +46,12 @@ function Outside({ grass }: { grass: number }) {
       <PastureHorses />
       <Flock />
       <Camels />
-      <Mother />
+      <Villagers />
+      <Cattle />
+      <Herd />
       <Herder />
       <Dog />
+      <Eagle />
       <Player />
     </group>
   );
@@ -60,10 +65,11 @@ export default function Game() {
     bindKeys();
     // debug handle for automated screenshots / tinkering in devtools
     const w = window as unknown as { __nv?: Record<string, unknown> };
-    w.__nv = { ...w.__nv, useGame, world, cam };
+    w.__nv = { ...w.__nv, useGame, world, cam, icam, herd };
     const nav = navigator as Navigator & { deviceMemory?: number };
     const small = window.matchMedia('(pointer: coarse)').matches || (nav.deviceMemory ?? 8) <= 4;
-    setLowEnd(small);
+    const q = getQuality(); // chosen in the title screen's settings
+    setLowEnd(q === 'auto' ? small : q === 'low');
   }, []);
 
   return (

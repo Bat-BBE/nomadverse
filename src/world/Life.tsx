@@ -4,6 +4,7 @@ import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { heightAt, LOC, riverDistance, slopePitch } from '@/game/terrain';
 import { loft } from '@/game/geo';
+import { bodyCircles, setMover } from '@/game/colliders';
 import { world } from '@/game/store';
 import { HorseModel, type HorseHandle } from './Animals';
 import { Human, type HumanHandle } from './Human';
@@ -39,6 +40,7 @@ export function Herder() {
       horse.current.anim.speed = speed;
       horse.current.anim.graze = moving ? 0 : 0.8;
     }
+    bodyCircles(x, z, heading, 0.5, 0.45, 2).forEach((c, k) => setMover(`herder.${k}`, c.x, c.z, c.r));
     if (rider.current) {
       rider.current.position.set(x, y + 0.5, z);
       rider.current.rotation.y = heading;
@@ -272,6 +274,7 @@ export function Dog() {
       diff = Math.atan2(Math.sin(diff), Math.cos(diff));
       s.heading += diff * Math.min(1, dt * 2);
     }
+    setMover('dog', s.x, s.z, s.lie > 0.5 ? 0.45 : 0.35);
     world.dog.x = s.x;
     world.dog.z = s.z;
 
@@ -362,6 +365,92 @@ export function Dog() {
             </group>
           </group>
         ))}
+      </group>
+    </group>
+  );
+}
+
+// ---------------------------------------------------------------- Бүргэд
+// A golden eagle soaring in wide circles over the valley: long glides on
+// slightly raised wings, an occasional few deep wingbeats, and a gentle bank
+// into the turn.
+
+let eagleGeo: { body: THREE.BufferGeometry; wing: THREE.BufferGeometry; tail: THREE.BufferGeometry } | null = null;
+function eagleGeometry() {
+  if (eagleGeo) return eagleGeo;
+  const dark = new THREE.Color('#3a2a1e');
+  const gold = new THREE.Color('#9a7442');
+  const body = loft(
+    [
+      { p: [0, 0, -0.42], rx: 0.03, ryT: 0.03 },
+      { p: [0, 0, -0.25], rx: 0.09, ryT: 0.08 },
+      { p: [0, 0.01, 0.05], rx: 0.13, ryT: 0.12 },
+      { p: [0, 0.03, 0.3], rx: 0.08, ryT: 0.08 }, // golden nape
+      { p: [0, 0.03, 0.42], rx: 0.06, ryT: 0.06 },
+      { p: [0, 0.0, 0.52], rx: 0.02, ryT: 0.025 }, // hooked beak
+    ],
+    { radial: 12, steps: 4, color: (p, _t, _a, out) => out.copy(dark).lerp(gold, Math.max(0, (p.z - 0.2) * 3)).lerp(new THREE.Color('#d8b04a'), p.z > 0.47 ? 1 : 0) }
+  );
+  // a broad wing with "fingered" primaries at the tip (span ~1.1 m per side)
+  const s = new THREE.Shape();
+  s.moveTo(0, 0.18);
+  s.bezierCurveTo(0.35, 0.2, 0.7, 0.16, 0.95, 0.08);
+  for (let i = 0; i < 5; i++) {
+    const z = 0.08 - i * 0.07;
+    s.lineTo(1.12 - i * 0.025, z - 0.01);
+    s.lineTo(0.98 - i * 0.02, z - 0.04);
+  }
+  s.bezierCurveTo(0.7, -0.26, 0.35, -0.24, 0, -0.16);
+  s.lineTo(0, 0.18);
+  const wing = new THREE.ShapeGeometry(s, 8);
+  wing.rotateX(-Math.PI / 2); // lie in the XZ plane, leading edge toward +z
+  const tail = new THREE.ShapeGeometry(
+    new THREE.Shape([new THREE.Vector2(-0.06, 0), new THREE.Vector2(0.06, 0), new THREE.Vector2(0.14, -0.3), new THREE.Vector2(-0.14, -0.3)]),
+    1
+  );
+  tail.rotateX(-Math.PI / 2);
+  eagleGeo = { body, wing, tail };
+  return eagleGeo;
+}
+
+export function Eagle() {
+  const root = useRef<THREE.Group>(null);
+  const wingL = useRef<THREE.Group>(null);
+  const wingR = useRef<THREE.Group>(null);
+  const geo = useMemo(eagleGeometry, []);
+  const bodyMat = useMemo(() => new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85 }), []);
+  const wingMat = useMemo(() => new THREE.MeshStandardMaterial({ color: '#3d2c1f', roughness: 0.9, side: THREE.DoubleSide }), []);
+  useFrame(({ clock }) => {
+    const t = clock.elapsedTime;
+    const g = root.current;
+    if (!g) return;
+    // a slowly drifting circle, low enough to read in the opening shot
+    const a = t * 0.11;
+    const R = 34 + Math.sin(t * 0.05) * 8;
+    const cx = 6 + Math.sin(t * 0.02) * 10;
+    const cz = -10;
+    g.position.set(cx + Math.cos(a) * R, 26 + Math.sin(t * 0.17) * 4, cz + Math.sin(a) * R);
+    // fly along the tangent, banked into the turn
+    g.rotation.set(0, -a - Math.PI / 2, 0);
+    g.rotateX(0.3); // bank into the turn
+    // bursts of deep wingbeats, otherwise a dihedral glide with tiny adjustments
+    const burst = Math.max(0, Math.sin(t * 0.32)) > 0.93 ? 1 : 0;
+    const flap = burst ? Math.sin(t * 9) * 0.6 : 0.12 + Math.sin(t * 1.3) * 0.04;
+    if (wingL.current) wingL.current.rotation.z = flap;
+    if (wingR.current) wingR.current.rotation.z = -flap;
+  });
+  return (
+    <group ref={root}>
+      {/* modelled facing +z, then turned so +x is the flight direction */}
+      <group rotation-y={Math.PI / 2} scale={1.6}>
+        <mesh geometry={geo.body} material={bodyMat} castShadow />
+        <group ref={wingL} position={[0.08, 0.02, 0.05]}>
+          <mesh geometry={geo.wing} material={wingMat} castShadow />
+        </group>
+        <group ref={wingR} position={[-0.08, 0.02, 0.05]} scale={[-1, 1, 1]}>
+          <mesh geometry={geo.wing} material={wingMat} castShadow />
+        </group>
+        <mesh geometry={geo.tail} material={wingMat} position={[0, 0, -0.38]} />
       </group>
     </group>
   );

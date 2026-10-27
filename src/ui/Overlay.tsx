@@ -2,13 +2,17 @@
 import { useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { activeQuest, isDone, useGame, world } from '@/game/store';
-import { CHEST_ITEMS, INFO, QUESTS } from '@/game/content';
+import { CHEST_ITEMS, INFO, INFO_CATS, ITEM_CAT_LABEL, ITEMS, NPCS, QUESTS } from '@/game/content';
+import { dialogueFor } from '@/game/dialogue';
 import { keys, onPress, press } from '@/game/input';
 import { audio } from '@/game/audio';
 import { TOD_LABELS } from '@/game/tod';
 import { cam, objectiveTarget } from '@/world/Player';
 import { TeaPanel } from './TeaPanel';
-import { Arrow, Compass, Gear, Home, Journal, MountainLogo, Ornament, Sound, Sun } from './Icons';
+import { ActivityPanel } from './ActivityPanel';
+import { CreateScreen } from './Create';
+import { Title } from './Title';
+import { Arrow, Bag, Gear, Home, Journal, MountainLogo, Ornament, Sound, Sun } from './Icons';
 
 const fade = { initial: { opacity: 0, y: 10 }, animate: { opacity: 1, y: 0 }, exit: { opacity: 0, y: 6 } };
 
@@ -20,84 +24,13 @@ function useIsTouch() {
 
 // ---------------------------------------------------------------- title
 
-function Title() {
-  const phase = useGame((s) => s.phase);
-  const soundOn = useGame((s) => s.soundOn);
-  const enter = () => {
-    audio.start();
-    audio.setEnabled(useGame.getState().soundOn);
-    audio.click();
-    useGame.getState().setPhase('entering');
-  };
-  return (
-    <AnimatePresence>
-      {phase === 'title' && (
-        <motion.div className="title" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0, transition: { duration: 0.9 } }}>
-          <div className="title-vignette" />
-          <div className="logo">
-          <motion.div
-            className="logo-inner"
-            initial={{ opacity: 0, y: -16 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 1.0, duration: 1.8, ease: [0.2, 0.7, 0.2, 1] }}
-          >
-            <span className="logo-mark">
-              <MountainLogo size={150} />
-            </span>
-            <h1>NOMADVERSE</h1>
-            <div className="logo-sub">
-              <i />
-              INTERACTIVE 3D MONGOLIA
-              <i />
-            </div>
-            <p className="tagline">Discover the Soul of Mongolia.</p>
-          </motion.div>
-          </div>
-
-          <motion.blockquote className="quote" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 2.4, duration: 1.4 }}>
-            “Монголын ахуй, соёл, байгаль…
-            <br />
-            Одоо таны ертөнцөд”
-          </motion.blockquote>
-
-          <div className="start-wrap">
-          <motion.button
-            className="start-btn"
-            onClick={enter}
-            initial={{ opacity: 0, x: 20 }}
-            animate={{ opacity: 1, x: 0 }}
-            transition={{ delay: 2.8, duration: 1.1 }}
-          >
-            <span className="start-peak">
-              <MountainLogo size={34} />
-            </span>
-            <span>ENTER THE STEPPE</span>
-            <Arrow />
-          </motion.button>
-          </div>
-
-          <motion.div className="title-icons" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 3.2, duration: 1 }}>
-            <button onClick={() => useGame.getState().toggleSound()} aria-label="Дуу" title={soundOn ? 'Дуу асаалттай' : 'Дуугүй'}>
-              <Sound on={soundOn} />
-            </button>
-            <span className="title-line" />
-          </motion.div>
-
-          <motion.div className="title-footer" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 3.4, duration: 1 }}>
-            <Ornament size={14} /> EXPLORE <b>/</b> LIVE <b>/</b> BUILD <b>/</b> TOGETHER <Ornament size={14} />
-          </motion.div>
-        </motion.div>
-      )}
-    </AnimatePresence>
-  );
-}
-
 // ---------------------------------------------------------------- HUD
 
 function QuestPanel() {
   const questsDone = useGame((s) => s.questsDone);
   const steps = useGame((s) => s.steps);
   const circle = useGame((s) => s.circle);
+  const penned = useGame((s) => s.penned);
   const touch = useIsTouch();
   const [open, setOpen] = useState(true);
   useEffect(() => setOpen(!touch), [touch]);
@@ -125,11 +58,12 @@ function QuestPanel() {
               {q.steps.map((st) => {
                 const done = isDone(steps, q.id, st.id);
                 const isCircle = q.id === 'ovoo' && st.id === 'circle';
+                const isHerd = q.id === 'herd' && st.id === 'drive';
                 return (
                   <li key={st.id} className={done ? 'done' : ''}>
                     <span className="check" />
                     <span className="label">{st.label}</span>
-                    <span className="count">{isCircle && !done ? `${circle}/3` : done ? '1/1' : '0/1'}</span>
+                    <span className="count">{isCircle && !done ? `${circle}/3` : isHerd && !done ? `${penned}/5` : done ? '1/1' : '0/1'}</span>
                   </li>
                 );
               })}
@@ -156,7 +90,10 @@ function TopBar() {
       <button className="icon-btn" onClick={() => g().cycleTod()} title={`Цаг: ${TOD_LABELS[tod]} (T)`} aria-label="Өдрийн цаг">
         <Sun />
       </button>
-      <button className="icon-btn" onClick={() => g().setModal({ type: 'journal' })} title="Аяллын тэмдэглэл (J)" aria-label="Тэмдэглэл">
+      <button className="icon-btn" onClick={() => g().setModal({ type: 'inventory' })} title="Эд зүйлс (I)" aria-label="Эд зүйлс">
+        <Bag />
+      </button>
+      <button className="icon-btn" onClick={() => g().setModal({ type: 'journal' })} title="Монгол өвийн мэдлэг (J)" aria-label="Мэдлэг">
         <Journal />
       </button>
       <button className="icon-btn" onClick={() => g().toggleSound()} title="Дуу" aria-label="Дуу">
@@ -248,7 +185,7 @@ function Prompt() {
           </motion.button>
         ) : null}
       </AnimatePresence>
-      {scene === 'inside' && !hover && <div className="inside-hint">Эд зүйлс дээр дарж танилц · Чирж эргэн тойрноо хар</div>}
+      {scene === 'inside' && !hover && <div className="inside-hint">WASD — алхах · Тооно, унь, хана, багана дээр дарж танилц</div>}
     </div>
   );
 }
@@ -316,7 +253,7 @@ function TouchControls() {
   useEffect(() => {
     keys.ShiftLeft = run;
   }, [run]);
-  if (!touch || scene !== 'outside') return null;
+  if (!touch) return null;
   const R = 48;
   const update = (e: React.PointerEvent) => {
     const r = base.current!.getBoundingClientRect();
@@ -413,40 +350,70 @@ function Chest() {
   );
 }
 
-function motherLine(): string[] {
-  const s = useGame.getState();
-  const done = s.questsDone;
-  if (!done.includes('morning'))
-    return ['Өглөөний мэнд, миний хүү!', 'Адуугаа нэг эргээд, голоос ус аваад ир. Дараа нь хамтдаа өглөөний цайгаа чанацгаая.'];
-  if (!done.includes('tea')) return ['Ус авчирсан уу? Сайн байна.', 'Гэрт ороод зуухан дээрх тогоонд сүүтэй цайгаа чанаарай. Самраад, дээжийг нь хойморт барина шүү.'];
-  if (!done.includes('ger')) return ['Цай чинь ямар сайхан болсон бэ.', 'Гэрийнхээ тооно, унь, хана, баганыг сайн таньж мэдээрэй. Нүүдэлчин хүн гэрээ барьж, буулгаж чаддаг байх ёстой.'];
-  if (!done.includes('ride') || !done.includes('ovoo'))
-    return ['Морь чинь уяан дээр чамайг хүлээж байна.', 'Баруун хойд толгойн овоонд гараад, нар зөв гурав тойрч, чулуу өргөөрэй. Замдаа болгоомжтой яваарай.'];
-  return ['Сайн явж ирлээ, миний хүү.', 'Нар жаргаж байна. Тал нутгийн үдэш ямар сайхан бэ — одод гарахыг хамт харъя.'];
-}
-
-function Talk() {
-  const lines = motherLine();
+function NpcDialog({ id }: { id: keyof typeof NPCS }) {
+  const def = NPCS[id];
+  const d = dialogueFor(id);
   return (
     <div className="talk">
       <div className="talk-head">
-        <span className="portrait">Э</span>
+        <span className="portrait" style={{ background: `radial-gradient(circle at 50% 35%, ${def.look.deel}, #1a1410)` }}>
+          {def.name[0]}
+        </span>
         <div>
-          <div className="eyebrow">Malchin ger — Ээж</div>
-          <h3>Ээж</h3>
+          <div className="eyebrow">{def.role}</div>
+          <h3>{def.name}</h3>
         </div>
       </div>
       <div className="rule" />
-      {lines.map((l, i) => (
-        <motion.p key={i} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 + i * 0.5 }}>
+      {d.lines.map((l, i) => (
+        <motion.p key={l} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 + i * 0.35 }}>
           {l}
         </motion.p>
       ))}
       <div className="row">
-        <button className="primary" onClick={() => useGame.getState().setModal(null)}>
-          За, ээж ээ
-        </button>
+        {d.actions.map((a) => (
+          <button
+            key={a.label}
+            className={a.primary ? 'primary' : 'ghost'}
+            onClick={() => {
+              audio.click();
+              a.run();
+            }}
+          >
+            {a.label}
+          </button>
+        ))}
       </div>
+    </div>
+  );
+}
+
+function Inventory() {
+  const inv = useGame((s) => s.inventory);
+  const entries = Object.entries(inv).filter(([k, n]) => ITEMS[k] && n > 0);
+  return (
+    <div className="info">
+      <div className="eyebrow">Inventory</div>
+      <h3>Эд зүйлс</h3>
+      <div className="rule" />
+      {entries.length === 0 ? (
+        <p>Одоохондоо хоосон. Ажил хийж, хүмүүст туслахад эд зүйлс цуглана.</p>
+      ) : (
+        <div className="inv-grid">
+          {entries.map(([k, n]) => (
+            <div key={k} className="inv-item">
+              <span className="inv-swatch" style={{ background: ITEMS[k].color }}>
+                {n}
+              </span>
+              <div>
+                <strong>{ITEMS[k].name}</strong>
+                <small className="inv-cat">{ITEM_CAT_LABEL[ITEMS[k].cat]}</small>
+                <small>{ITEMS[k].desc}</small>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -454,44 +421,63 @@ function Talk() {
 function JournalModal() {
   const steps = useGame((s) => s.steps);
   const questsDone = useGame((s) => s.questsDone);
+  const order = useGame((s) => s.questOrder);
+  const xp = useGame((s) => s.xp);
+  const acts = useGame((s) => s.activitiesDone);
   const [sel, setSel] = useState<string | null>(null);
   if (sel) return <InfoCard id={sel} onBack={() => setSel(null)} />;
-  const learned = Object.keys(INFO).filter((k) => steps[`info.${k}`] || steps[`ger.${k}`]);
+  const learned = (k: string) => !!steps[`info.${k}`];
+  const total = Object.keys(INFO).length;
+  const count = Object.keys(INFO).filter(learned).length;
+  const current = activeQuest(questsDone, order);
   return (
     <div className="info journal">
-      <div className="eyebrow">Your journey</div>
-      <h3>Аяллын тэмдэглэл</h3>
+      <div className="eyebrow">Nomad Knowledge</div>
+      <h3>Монгол өвийн мэдлэг</h3>
+      <div className="stats">
+        <span><b>{xp}</b> XP</span>
+        <span><b>{questsDone.length}</b>/{QUESTS.length} даалгавар</span>
+        <span><b>{acts.length}</b> ажил</span>
+        <span><b>{count}</b>/{total} мэдлэг</span>
+      </div>
       <div className="rule" />
       <ol className="journey">
-        {QUESTS.map((q, i) => {
-          const done = questsDone.includes(q.id);
-          const current = !done && activeQuest(questsDone)?.id === q.id;
+        {order.map((id, i) => {
+          const q = QUESTS.find((x) => x.id === id)!;
+          const done = questsDone.includes(id);
+          const now = current?.id === id;
           return (
-            <li key={q.id} className={done ? 'done' : current ? 'now' : ''}>
+            <li key={id} className={done ? 'done' : now ? 'now' : ''}>
               <span className="journey-n"><b>{i + 1}</b></span>
               <div>
                 <strong>{q.title}</strong>
-                <small>{done ? 'Биелсэн' : current ? 'Одоо' : 'Удахгүй'}</small>
+                <small>{done ? 'Биелсэн' : now ? 'Одоо' : 'Нээлттэй'}</small>
               </div>
             </li>
           );
         })}
       </ol>
-      <h4>Мэдлэг · {learned.length}/{Object.keys(INFO).length}</h4>
-      <div className="items">
-        {Object.keys(INFO).map((k) =>
-          learned.includes(k) ? (
-            <button key={k} className="item" onClick={() => setSel(k)}>
-              <Ornament size={14} />
-              {INFO[k].title}
-            </button>
-          ) : (
-            <div key={k} className="item locked">
-              ? ? ?
-            </div>
-          )
-        )}
-      </div>
+      {INFO_CATS.map((c) => (
+        <div key={c.id}>
+          <h4>
+            {c.title} · {c.ids.filter(learned).length}/{c.ids.length}
+          </h4>
+          <div className="items">
+            {c.ids.map((k) =>
+              learned(k) ? (
+                <button key={k} className="item" onClick={() => setSel(k)}>
+                  <Ornament size={14} />
+                  {INFO[k]?.title}
+                </button>
+              ) : (
+                <div key={k} className="item locked">
+                  ? ? ?
+                </div>
+              )
+            )}
+          </div>
+        </div>
+      ))}
     </div>
   );
 }
@@ -511,13 +497,23 @@ function Menu() {
           <tr><td><kbd>Shift</kbd></td><td>Гүйх / давхих</td></tr>
           <tr><td>Хулгана чирэх, дугуй</td><td>Камер эргүүлэх, ойртуулах</td></tr>
           <tr><td><kbd>E</kbd></td><td>Харилцах, морь унах/буух, гэрт орох</td></tr>
-          <tr><td><kbd>T</kbd> · <kbd>J</kbd></td><td>Өдрийн цаг · Тэмдэглэл</td></tr>
+          <tr><td><kbd>T</kbd> · <kbd>J</kbd> · <kbd>I</kbd></td><td>Өдрийн цаг · Мэдлэг · Эд зүйлс</td></tr>
           <tr><td><kbd>Esc</kbd></td><td>Тохиргоо</td></tr>
         </tbody>
       </table>
       <div className="row">
         <button className="ghost" onClick={() => useGame.getState().toggleSound()}>{soundOn ? 'Дуу унтраах' : 'Дуу асаах'}</button>
         <button className="ghost" onClick={() => useGame.getState().cycleTod()}>Цаг: {TOD_LABELS[tod]}</button>
+        <button className="ghost" onClick={() => useGame.getState().saveNow()}>Хадгалах</button>
+        <button
+          className="ghost"
+          onClick={() => {
+            useGame.getState().saveNow(true);
+            window.location.reload();
+          }}
+        >
+          Гарчиг руу
+        </button>
         <button className="primary" onClick={close}>Үргэлжлүүлэх</button>
       </div>
     </div>
@@ -526,13 +522,19 @@ function Menu() {
 
 function Modals() {
   const modal = useGame((s) => s.modal);
-  const close = () => useGame.getState().setModal(null);
+  const close = () => (useGame.getState().activity ? useGame.getState().cancelActivity() : useGame.getState().setModal(null));
   return (
     <AnimatePresence>
       {modal && (
-        <motion.div className="modal-back" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={close}>
+        <motion.div
+          className={`modal-back ${modal.type === 'activity' ? 'side' : ''}`}
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          onClick={modal.type === 'activity' ? undefined : close}
+        >
           <motion.div
-            className={`modal ${modal.type === 'tea' || modal.type === 'journal' ? 'wide' : ''} ${modal.type === 'talk' ? 'talk-modal' : ''}`}
+            className={`modal ${modal.type === 'tea' || modal.type === 'journal' || modal.type === 'activity' || modal.type === 'inventory' ? 'wide' : ''} ${modal.type === 'npc' ? 'talk-modal' : ''}`}
             initial={{ opacity: 0, y: 24, scale: 0.98 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 12 }}
@@ -548,7 +550,9 @@ function Modals() {
             {modal.type === 'chest' && <Chest />}
             {modal.type === 'tea' && <TeaPanel />}
             {modal.type === 'menu' && <Menu />}
-            {modal.type === 'talk' && <Talk />}
+            {modal.type === 'npc' && <NpcDialog id={modal.id} />}
+            {modal.type === 'activity' && <ActivityPanel />}
+            {modal.type === 'inventory' && <Inventory />}
             {modal.type === 'journal' && <JournalModal />}
           </motion.div>
         </motion.div>
@@ -568,10 +572,14 @@ export function Overlay() {
       onPress((code) => {
         const s = useGame.getState();
         if (s.phase !== 'play') return;
-        if (code === 'Escape') s.setModal(s.modal ? null : { type: 'menu' });
+        if (code === 'Escape') {
+          if (s.activity) s.cancelActivity();
+          else s.setModal(s.modal ? null : { type: 'menu' });
+        }
         else if (code === 'KeyT' && !s.modal) s.cycleTod();
         else if (code === 'KeyJ') s.setModal(s.modal?.type === 'journal' ? null : { type: 'journal' });
-        else if (code === 'KeyE' && s.modal && (s.modal.type === 'info' || s.modal.type === 'talk')) setTimeout(() => s.setModal(null), 0); // after other E handlers bail
+        else if (code === 'KeyI') s.setModal(s.modal?.type === 'inventory' ? null : { type: 'inventory' });
+        else if (code === 'KeyE' && s.modal && (s.modal.type === 'info' || s.modal.type === 'npc')) setTimeout(() => s.setModal(null), 0); // after other E handlers bail
       }),
     []
   );
@@ -579,6 +587,7 @@ export function Overlay() {
   return (
     <div className="overlay">
       <Title />
+      <AnimatePresence>{phase === 'create' && <CreateScreen />}</AnimatePresence>
       {phase === 'play' && (
         <>
           <QuestPanel />

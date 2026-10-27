@@ -6,6 +6,7 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 import { loft, sculpt } from '@/game/geo';
 import { heightAt, LOC, slopePitch } from '@/game/terrain';
 import { world } from '@/game/store';
+import { addStatic, bodyCircles, setMover } from '@/game/colliders';
 
 // ---------------------------------------------------------------- Horse
 // The horse model lives in ./Horse; re-exported here for existing imports.
@@ -65,7 +66,9 @@ function WanderingHorse({ index, coat }: { index: number; coat: [string, string]
         let diff = want - s.heading;
         diff = Math.atan2(Math.sin(diff), Math.cos(diff));
         s.heading += diff * Math.min(1, dt * 2);
-        speed = 1.2;
+        // don't walk into the player standing in front
+        const ahead = Math.hypot(s.x + Math.sin(s.heading) * 1.2 - world.player.x, s.z + Math.cos(s.heading) * 1.2 - world.player.z);
+        speed = ahead < 1.3 ? 0 : 1.2;
         s.x += Math.sin(s.heading) * speed * dt;
         s.z += Math.cos(s.heading) * speed * dt;
       }
@@ -79,6 +82,7 @@ function WanderingHorse({ index, coat }: { index: number; coat: [string, string]
       rel = Math.atan2(Math.sin(rel), Math.cos(rel));
       hh.anim.look = THREE.MathUtils.clamp(rel, -0.7, 0.7);
     } else hh.anim.look = 0;
+    bodyCircles(s.x, s.z, s.heading, 0.5, 0.42, 2).forEach((c, k) => setMover(`horse.p${index}.${k}`, c.x, c.z, c.r));
     g.position.set(s.x, heightAt(s.x, s.z), s.z);
     g.rotation.y = s.heading;
     g.rotation.x += (-slopePitch(s.x, s.z, s.heading) - g.rotation.x) * 0.1;
@@ -115,7 +119,7 @@ interface Member {
 // Mongolian fat-tailed sheep: lumpy fleece, broad fat tail, long drooping-eared
 // head on a separate pivot (grazing), and four legs that step while walking.
 let sheepGeo: { body: THREE.BufferGeometry; goatBody: THREE.BufferGeometry; head: THREE.BufferGeometry; leg: THREE.BufferGeometry } | null = null;
-function sheepGeometry() {
+export function sheepGeometry() {
   if (sheepGeo) return sheepGeo;
   const fleece = sculpt(1, 28, 20, (d) => {
     // fleece clumps
@@ -147,7 +151,7 @@ function sheepGeometry() {
   return sheepGeo;
 }
 
-const LEG_OFFSETS: [number, number, number][] = [
+export const LEG_OFFSETS: [number, number, number][] = [
   [0.12, 0.32, 0.26],
   [-0.12, 0.32, 0.26],
   [0.12, 0.32, -0.26],
@@ -246,6 +250,7 @@ export function Flock({ count = 46 }: { count?: number }) {
         diff = Math.atan2(Math.sin(diff), Math.cos(diff));
         m.heading += diff * Math.min(1, dt * 3);
       }
+      setMover(`flock.${i}`, m.x, m.z, 0.36);
       m.stride += (speed > 0.1 ? 1 : -1) * dt * 4;
       m.stride = Math.min(1, Math.max(0, m.stride));
       m.phase += dt * (2 + speed * 3.5) * m.stride;
@@ -390,8 +395,17 @@ function Camel({ x, z, rot, seed }: { x: number; z: number; rot: number; seed: n
   );
 }
 
+let camelsRegistered = false;
 export function Camels() {
   const { x, z } = LOC.camels;
+  if (!camelsRegistered) {
+    camelsRegistered = true;
+    addStatic([
+      ...bodyCircles(x, z, 0.8, 0.85, 0.5, 3),
+      ...bodyCircles(x + 4, z + 2.5, 2.2, 0.85, 0.5, 3),
+      ...bodyCircles(x - 3, z + 4, -0.6, 0.85, 0.5, 3),
+    ]);
+  }
   return (
     <>
       <Camel x={x} z={z} rot={0.8} seed={1} />

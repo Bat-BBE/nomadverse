@@ -1,10 +1,10 @@
 'use client';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { useFrame, useThree, type ThreeEvent } from '@react-three/fiber';
-import { OrbitControls, useCursor } from '@react-three/drei';
+import { useFrame, type ThreeEvent } from '@react-three/fiber';
+import { useCursor } from '@react-three/drei';
 import * as THREE from 'three';
-import { useGame } from '@/game/store';
-import { onPress } from '@/game/input';
+import { useGame, world } from '@/game/store';
+import { DOOR_IN, InteriorPlayer } from './InteriorPlayer';
 import { audio } from '@/game/audio';
 import { carpetTexture, chestTexture, columnTexture, doorTexture, wallClothTexture } from '@/game/textures';
 import { Smoke } from './Ger';
@@ -414,7 +414,12 @@ function Cupboard() {
 function MorinKhuur() {
   const a = Math.PI + 0.75; // west side toward the khoimor
   const rr = R - 0.25;
+  const g = useRef<THREE.Group>(null);
+  useFrame(() => {
+    if (g.current) g.current.visible = !world.khuurInHand;
+  });
   return (
+    <group ref={g}>
     <Clickable label="Морин хуур" onSelect={() => useGame.getState().setModal({ type: 'info', id: 'morinkhuur' })}>
       <group position={[Math.cos(a) * rr, 0, Math.sin(a) * rr]} rotation-y={-a - Math.PI / 2} rotation-x={-0.12}>
         <mesh position-y={0.45} castShadow>
@@ -436,6 +441,7 @@ function MorinKhuur() {
         </mesh>
       </group>
     </Clickable>
+    </group>
   );
 }
 
@@ -476,47 +482,25 @@ function InteriorLights() {
 }
 
 export function Interior() {
-  const camera = useThree((s) => s.camera);
-  useEffect(() => {
-    camera.position.set(1.25, 1.55, 1.85);
-    camera.lookAt(-0.2, 1.0, -1.2);
-  }, [camera]);
-
-  // E (with no modal open) steps back outside
-  useEffect(
-    () =>
-      onPress((code) => {
-        const s = useGame.getState();
-        if (code === 'KeyE' && s.scene === 'inside' && !s.modal && !s.fading) exitGer();
-      }),
-    []
-  );
-
-  useEffect(() => {
-    useGame.getState().setPrompt('Гадагш гарах');
-    return () => useGame.getState().setPrompt(null);
-  }, []);
-
   return (
     <group>
-      <OrbitControls
-        makeDefault
-        target={[-0.2, 1.0, -1.2]}
-        enablePan={false}
-        minDistance={1.2}
-        maxDistance={3.4}
-        minPolarAngle={0.9}
-        maxPolarAngle={2.0}
-        rotateSpeed={0.5}
-        enableDamping
-      />
+      <InteriorPlayer />
       <InteriorLights />
       <Shell />
       <Clickable label="Хана" onSelect={() => learn('khana')}>
         <Lattice />
+        {/* invisible surface just inside the lattice so the gaps are clickable too */}
+        <mesh position-y={WALL / 2}>
+          <cylinderGeometry args={[R - 0.08, R - 0.08, WALL - 0.1, 48, 1, true, 0.25, Math.PI * 2 - 0.5]} />
+          <meshBasicMaterial side={THREE.DoubleSide} transparent opacity={0} depthWrite={false} />
+        </mesh>
       </Clickable>
       <Clickable label="Унь" onSelect={() => learn('uni')}>
         <Uni />
+        <mesh position-y={(WALL + TOP) / 2 - 0.05}>
+          <cylinderGeometry args={[TOONO + 0.4, R - 0.1, TOP - WALL - 0.1, 48, 1, true]} />
+          <meshBasicMaterial side={THREE.DoubleSide} transparent opacity={0} depthWrite={false} />
+        </mesh>
       </Clickable>
       <Clickable label="Тооно" onSelect={() => learn('toono')}>
         <Toono />
@@ -553,7 +537,9 @@ export function Interior() {
   );
 }
 
+/** Clicking the door: leave if standing by it, otherwise say where to go. */
 export function exitGer() {
-  const s = useGame.getState();
-  s.goScene('outside');
+  const p = world.inside;
+  if (Math.hypot(p.x - DOOR_IN.x, p.z - DOOR_IN.z) < 1.6) world.cutscene = { type: 'leave', t: 0 };
+  else useGame.getState().toast('Хаалга руу оч', 'Хаалганы дэргэд очоод E дарна уу');
 }

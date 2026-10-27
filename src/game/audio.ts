@@ -183,3 +183,85 @@ class AudioEngine {
 }
 
 export const audio = new AudioEngine();
+
+/**
+ * Morin khuur: a bowed two-string sound (sawtooth through a body filter, with
+ * vibrato and a slow bow swell) playing a pentatonic long-song style phrase
+ * over a soft drone on the lower string. Loops until stopped.
+ */
+let khuurTimer: number | null = null;
+let khuurNodes: AudioNode[] = [];
+export function playMorinKhuur(on: boolean) {
+  const ctx = audio.ctx;
+  const master = audio.master;
+  if (khuurTimer) {
+    clearTimeout(khuurTimer);
+    khuurTimer = null;
+  }
+  khuurNodes.forEach((n) => {
+    try {
+      (n as OscillatorNode).stop?.();
+      n.disconnect();
+    } catch {
+      /* already stopped */
+    }
+  });
+  khuurNodes = [];
+  if (!on || !ctx || !master) return;
+
+  const body = ctx.createBiquadFilter();
+  body.type = 'lowpass';
+  body.frequency.value = 1600;
+  body.Q.value = 1.2;
+  const out = ctx.createGain();
+  out.gain.value = 0.16;
+  body.connect(out).connect(master);
+  khuurNodes.push(body, out);
+
+  // drone on the lower string
+  const drone = ctx.createOscillator();
+  drone.type = 'sawtooth';
+  drone.frequency.value = 110;
+  const dg = ctx.createGain();
+  dg.gain.value = 0.18;
+  drone.connect(dg).connect(body);
+  drone.start();
+  khuurNodes.push(drone, dg);
+
+  // A minor pentatonic phrase: [note Hz, beats]
+  const phrase: [number, number][] = [
+    [220, 2], [262, 1], [294, 1], [330, 3], [294, 1], [262, 2], [220, 2],
+    [196, 1], [220, 1], [262, 2], [330, 1], [392, 1], [330, 4], [294, 2], [220, 4],
+  ];
+  const beat = 0.42;
+  const playPhrase = () => {
+    let t = ctx.currentTime + 0.05;
+    for (const [f, b] of phrase) {
+      const d = b * beat;
+      const o = ctx.createOscillator();
+      o.type = 'sawtooth';
+      o.frequency.setValueAtTime(f * 0.985, t);
+      o.frequency.linearRampToValueAtTime(f, t + 0.08); // slide into the note
+      const vib = ctx.createOscillator();
+      vib.frequency.value = 5.2;
+      const vg = ctx.createGain();
+      vg.gain.setValueAtTime(0, t);
+      vg.gain.linearRampToValueAtTime(f * 0.012, t + d * 0.6); // vibrato grows on long notes
+      vib.connect(vg).connect(o.frequency);
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(0.5, t + 0.12); // bow attack
+      g.gain.setValueAtTime(0.5, t + d - 0.12);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + d + 0.05);
+      o.connect(g).connect(body);
+      o.start(t);
+      vib.start(t);
+      o.stop(t + d + 0.1);
+      vib.stop(t + d + 0.1);
+      t += d;
+    }
+    const total = phrase.reduce((a, [, b]) => a + b, 0) * beat;
+    khuurTimer = window.setTimeout(playPhrase, (total + 0.8) * 1000);
+  };
+  playPhrase();
+}

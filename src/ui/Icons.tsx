@@ -34,6 +34,15 @@ export const Journal = ({ size }: P) => (
   </svg>
 );
 
+export const Bag = ({ size }: P) => (
+  <svg {...base(size)}>
+    {/* leather saddlebag (дөрвөлжин уут) with a flap and a strap */}
+    <path d="M5 10.5c0-1.4 1.1-2.5 2.5-2.5h9c1.4 0 2.5 1.1 2.5 2.5V18a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2z" />
+    <path d="M5 11.5c2.2 2 11.8 2 14 0M12 13.6v2" />
+    <path d="M8.5 8V6.5a3.5 3.5 0 0 1 7 0V8" />
+  </svg>
+);
+
 export const Gear = ({ size }: P) => (
   <svg {...base(size)}>
     <circle cx="12" cy="12" r="3" />
@@ -73,3 +82,52 @@ export const Arrow = ({ size = 18 }: P) => (
     <path d="M4 12h15M14 7l5 5-5 5" />
   </svg>
 );
+
+// ---- starting activity glyphs
+export const ActivityIcon = ({ id, size = 40 }: { id: string; size?: number }) => {
+  const p = { ...base(size), strokeWidth: 1.3 };
+  switch (id) {
+    case 'herding':
+      return (
+        <svg {...p}>
+          <path d="M6 13c0-2.5 2.2-4.5 5-4.5S16 10 16 13s-2.2 3.5-5 3.5S6 15.5 6 13z" />
+          <path d="M16 11.5c1-.8 2.5-.6 3 .4s-.2 2.2-1.4 2.4M8 16.5V19M14 16.5V19M5 11l-1.5-1" />
+        </svg>
+      );
+    case 'dairy':
+      return (
+        <svg {...p}>
+          <path d="M7 6h10l-1 13H8z" />
+          <path d="M7 9.5h10M10 6V4h4v2" />
+        </svg>
+      );
+    case 'sewing':
+      return (
+        <svg {...p}>
+          <path d="M4 20 18 6M18 6l1.5-1.5M15 5l4 4" />
+          <path d="M6 18c4 1 9-1 12-6" strokeDasharray="1.5 2" />
+        </svg>
+      );
+    case 'felt':
+      return (
+        <svg {...p}>
+          <rect x="4" y="9" width="16" height="7" rx="3.5" />
+          <path d="M8 9v7M16 9v7M3 12.5h-1M22 12.5h-1" />
+        </svg>
+      );
+    case 'riding':
+      return (
+        <svg {...p}>
+          <path d="M5 15c1-4 4-6 8-6l3-3 1 2 2 1-2 2v4" />
+          <path d="M7 15v4M11 15v4M15 15v4M17 15v4M5 15h12" />
+        </svg>
+      );
+    default:
+      return (
+        <svg {...p}>
+          <path d="M4 13a8 5 0 0 1 16 0v6H4z" />
+          <path d="M10 19v-4h4v4M12 8V5" />
+        </svg>
+      );
+  }
+};

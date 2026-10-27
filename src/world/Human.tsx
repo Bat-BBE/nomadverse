@@ -9,10 +9,14 @@ import { headGeometry } from '@/game/geo';
 // facing +z, feet at y = 0. Everything animates procedurally: walk/run cycle,
 // idle breathing and glances, blinking, and a riding pose.
 
+export type HumanPose = 'stand' | 'sit' | 'lie' | 'warm' | 'play' | 'milk' | 'work' | 'sew' | 'cheer';
+
 export interface HumanAnim {
   speed: number; // m/s
   riding: boolean;
   gallop: number; // 0..1 bounce while riding
+  pose: HumanPose;
+  sip: boolean; // holding a cup while sitting: raise it now and then
 }
 
 export interface HumanHandle {
@@ -26,7 +30,14 @@ export interface HumanLook {
   skin?: string;
   woman?: boolean;
   hat?: boolean;
+  /** headwear; defaults: women 'scarf', men 'malgai' (or 'none' when hat=false) */
+  hatStyle?: 'malgai' | 'toortsog' | 'scarf' | 'none';
+  hair?: 'short' | 'braid' | 'twobraids';
+  boots?: string;
+  headColor?: string; // hat crown / scarf colour
   seed?: number;
+  /** something held in the right hand (cup, bow...) */
+  rightHand?: React.ReactNode;
 }
 
 const HIP_Y = 0.92;
@@ -106,10 +117,23 @@ function tube(points: [number, number, number][], r: number) {
 }
 
 export const Human = forwardRef<HumanHandle, HumanLook>(function Human(
-  { deel = '#2a5a96', trim = '#d9a641', sash = '#e39b2f', skin = '#b98463', woman = false, hat = true, seed = 0 },
+  {
+    deel = '#2a5a96',
+    trim = '#d9a641',
+    sash = '#e39b2f',
+    skin = '#b98463',
+    woman = false,
+    hat = true,
+    hatStyle,
+    hair,
+    boots,
+    headColor,
+    seed = 0,
+    rightHand,
+  },
   ref
 ) {
-  const anim = useRef<HumanAnim>({ speed: 0, riding: false, gallop: 0 });
+  const anim = useRef<HumanAnim>({ speed: 0, riding: false, gallop: 0, pose: 'stand', sip: false });
   useImperativeHandle(ref, () => ({ anim: anim.current }), []);
 
   const hips = useRef<THREE.Group>(null);
@@ -121,6 +145,8 @@ export const Human = forwardRef<HumanHandle, HumanLook>(function Human(
   const knee = [useRef<THREE.Group>(null), useRef<THREE.Group>(null)];
   const arm = [useRef<THREE.Group>(null), useRef<THREE.Group>(null)];
   const elbow = [useRef<THREE.Group>(null), useRef<THREE.Group>(null)];
+  const skirtMesh = useRef<THREE.Mesh>(null);
+  const cloth = useRef({ wasDeformed: false });
   const st = useRef({ phase: seed, blink: 2 + seed, look: 0, lookT: 3 + seed, lookTo: 0 });
 
   // ---- materials
@@ -138,16 +164,16 @@ export const Human = forwardRef<HumanHandle, HumanLook>(function Human(
       hair: new THREE.MeshStandardMaterial({ color: '#15100c', roughness: 0.55 }),
       eyeW: new THREE.MeshStandardMaterial({ color: '#efe9df', roughness: 0.3 }),
       iris: new THREE.MeshStandardMaterial({ color: '#1d120a', roughness: 0.15 }),
-      boot: new THREE.MeshStandardMaterial({ color: woman ? '#7a2a1c' : '#5a1f14', roughness: 0.45 }),
+      boot: new THREE.MeshStandardMaterial({ color: boots ?? (woman ? '#7a2a1c' : '#5a1f14'), roughness: 0.45 }),
       sole: new THREE.MeshStandardMaterial({ color: '#2a1d14', roughness: 0.8 }),
       trousers: new THREE.MeshStandardMaterial({ color: '#2b2622', roughness: 0.9 }),
       silver: new THREE.MeshStandardMaterial({ color: '#c9ccd0', roughness: 0.25, metalness: 0.9 }),
       leather: new THREE.MeshStandardMaterial({ color: '#4a3020', roughness: 0.7 }),
-      hatRed: new THREE.MeshStandardMaterial({ color: '#9e2a1c', roughness: 0.75 }),
+      hatRed: new THREE.MeshStandardMaterial({ color: headColor ?? '#9e2a1c', roughness: 0.75 }),
       fur: new THREE.MeshStandardMaterial({ color: '#3b2a1e', roughness: 1 }),
-      scarf: new THREE.MeshStandardMaterial({ color: '#d9b45a', roughness: 0.7 }),
+      scarf: new THREE.MeshStandardMaterial({ color: headColor ?? '#d9b45a', roughness: 0.7 }),
     };
-  }, [deel, trim, sash, skin, woman]);
+  }, [deel, trim, sash, skin, woman, boots, headColor]);
 
   // ---- geometry
   const g = useMemo(() => {
@@ -228,6 +254,12 @@ export const Human = forwardRef<HumanHandle, HumanLook>(function Human(
     return { upper, lower, lapel, sleeve, forearm, cuff, boot, head };
   }, []);
 
+  const skirtBase = useMemo(() => (g.lower.attributes.position.array as Float32Array).slice(), [g]);
+  const inv = useMemo(() => new THREE.Matrix4(), []);
+  const eu = useMemo(() => new THREE.Euler(), []);
+  const eu2 = useMemo(() => new THREE.Euler(), []);
+  const chain = useMemo(() => Array.from({ length: 8 }, () => new THREE.Vector3()), []);
+
   useFrame(({ clock }, rawDt) => {
     const dt = Math.min(rawDt, 0.05);
     const a = anim.current;
@@ -258,6 +290,96 @@ export const Human = forwardRef<HumanHandle, HumanLook>(function Human(
       if (hips.current) hips.current.position.y = HIP_Y + b;
       lerpX(spine.current, 0.12 + a.gallop * 0.12 + b);
       lerpX(skirt.current, -0.6);
+    } else if (a.pose !== 'stand') {
+      // ---- still poses: sitting cross-legged, lying down, warming hands, playing the morin khuur
+      const pose = a.pose;
+      const sitting = pose === 'sit' || pose === 'sew';
+      const playing = pose === 'play' || pose === 'milk';
+      for (const i of [0, 1]) {
+        const side = i === 0 ? 1 : -1;
+        if (sitting) {
+          // cross-legged on the floor: thighs out to the sides, shins folded in
+          lerpX(thigh[i].current, -1.38, side * 0.62);
+          lerpX(knee[i].current, 2.25);
+        } else if (playing) {
+          // on a low stool, knees apart to hold the instrument
+          lerpX(thigh[i].current, -1.45, side * 0.32);
+          lerpX(knee[i].current, 1.5);
+        } else {
+          lerpX(thigh[i].current, pose === 'lie' ? 0.02 : 0, side * 0.03);
+          lerpX(knee[i].current, pose === 'lie' ? 0.08 : 0.05);
+        }
+      }
+      // arms
+      const cycle = (t % 4.5) / 4.5;
+      const sipUp = a.sip && sitting ? Math.max(0, Math.sin(Math.min(1, cycle / 0.45) * Math.PI)) : 0;
+      if (pose === 'milk') {
+        // hands reach forward under the udder, squeezing in turn
+        const sq = Math.sin(t * 7);
+        lerpX(arm[0].current, -0.95 + sq * 0.12, 0.05);
+        lerpX(elbow[0].current, -0.55 - Math.max(0, sq) * 0.2);
+        lerpX(arm[1].current, -0.95 - sq * 0.12, -0.05);
+        lerpX(elbow[1].current, -0.55 - Math.max(0, -sq) * 0.2);
+      } else if (pose === 'sew') {
+        // fabric in the left hand, the right pulls the thread up and away
+        const pull = Math.max(0, Math.sin(t * 2.4));
+        lerpX(arm[0].current, -0.6, 0.15);
+        lerpX(elbow[0].current, -1.1);
+        lerpX(arm[1].current, -0.7 - pull * 0.5, -0.15 - pull * 0.3);
+        lerpX(elbow[1].current, -1.0 + pull * 0.5);
+      } else if (pose === 'work') {
+        // both hands working in front: beating, rolling, pressing
+        const w = Math.sin(t * 5);
+        lerpX(arm[0].current, -0.9 + w * 0.35, 0.12);
+        lerpX(elbow[0].current, -0.6 - w * 0.2);
+        lerpX(arm[1].current, -0.9 + w * 0.35, -0.12);
+        lerpX(elbow[1].current, -0.6 - w * 0.2);
+      } else if (pose === 'cheer') {
+        const c = Math.sin(t * 6) * 0.15;
+        lerpX(arm[0].current, -2.6 + c, 0.25);
+        lerpX(elbow[0].current, -0.2);
+        lerpX(arm[1].current, -2.6 - c, -0.25);
+        lerpX(elbow[1].current, -0.2);
+      } else if (sitting) {
+        lerpX(arm[0].current, -0.35, 0.12);
+        lerpX(elbow[0].current, -0.7);
+        lerpX(arm[1].current, -0.45 - sipUp * 0.75, -0.12 - sipUp * 0.25);
+        lerpX(elbow[1].current, -0.85 - sipUp * 1.05);
+      } else if (playing) {
+        const bow = Math.sin(t * 1.9);
+        lerpX(arm[0].current, -0.85, 0.22); // left hand up on the neck
+        lerpX(elbow[0].current, -1.35);
+        lerpX(arm[1].current, -0.55 + bow * 0.12, -0.45 + bow * 0.2); // bowing arm
+        lerpX(elbow[1].current, -0.95 + bow * 0.35);
+      } else if (pose === 'warm') {
+        const rub = Math.sin(t * 6) * 0.06;
+        lerpX(arm[0].current, -1.15 + rub, 0.18);
+        lerpX(elbow[0].current, -0.55);
+        lerpX(arm[1].current, -1.15 - rub, -0.18);
+        lerpX(elbow[1].current, -0.55);
+      } else {
+        lerpX(arm[0].current, 0.0, 0.1);
+        lerpX(elbow[0].current, -0.25);
+        lerpX(arm[1].current, -0.3, -0.1);
+        lerpX(elbow[1].current, -1.2); // hand resting on the chest
+      }
+      const breathe = Math.sin(t * 1.3) * 0.006;
+      if (hips.current) {
+        const hy = sitting ? 0.3 : pose === 'milk' ? 0.42 : playing ? 0.5 : pose === 'work' ? HIP_Y - 0.06 : HIP_Y;
+        hips.current.position.y += (hy - hips.current.position.y) * k;
+        hips.current.rotation.y *= 0.9;
+        hips.current.rotation.z *= 0.9;
+      }
+      if (spine.current) {
+        lerpX(spine.current, sitting ? (pose === 'sew' ? 0.2 : 0.06 + sipUp * -0.08) : pose === 'milk' ? 0.35 : playing ? 0.1 : pose === 'warm' ? 0.12 : pose === 'work' ? 0.3 + Math.sin(t * 5) * 0.06 : 0, 0, 0);
+        spine.current.scale.set(1 + breathe, 1 + breathe * 0.5, 1 + breathe * 1.5);
+      }
+      if (skirt.current) {
+        // the hem gathers over the folded legs when seated
+        const sy = sitting ? 0.38 : playing ? 0.55 : 1;
+        skirt.current.scale.y += (sy - skirt.current.scale.y) * k;
+        lerpX(skirt.current, sitting ? -0.25 : playing ? -0.5 : 0);
+      }
     } else {
       for (const i of [0, 1]) {
         const p = ph + i * Math.PI;
@@ -281,6 +403,72 @@ export const Human = forwardRef<HumanHandle, HumanLook>(function Human(
       }
       // the hem sways a little with the stride
       lerpX(skirt.current, Math.sin(ph * 2) * 0.03 * sw - (run ? 0.12 : 0.04) * sw, Math.sin(ph) * 0.03 * sw);
+      if (skirt.current) skirt.current.scale.y += (1 - skirt.current.scale.y) * k;
+    }
+
+    // ---- the deel hangs over the legs: push the skirt out wherever a leg
+    // (thigh, shin, boot) would poke through, so the cloth moves with the stride
+    const sm = skirtMesh.current;
+    const walking = !a.riding && a.pose === 'stand';
+    if (sm && skirt.current && hips.current) {
+      const pos = sm.geometry.attributes.position as THREE.BufferAttribute;
+      const arr = pos.array as Float32Array;
+      if (walking) {
+        skirt.current.updateMatrix();
+        inv.copy(skirt.current.matrix).invert();
+        // leg chains (hip → knee → ankle → toe) in hips space, then skirt space
+        let n = 0;
+        for (const i of [0, 1]) {
+          const th = thigh[i].current;
+          const kn = knee[i].current;
+          if (!th || !kn) continue;
+          eu.set(th.rotation.x, th.rotation.y, th.rotation.z);
+          const hip = chain[n++].set(th.position.x, th.position.y, th.position.z);
+          const kneeP = chain[n++].set(0, -0.43, 0).applyEuler(eu).add(hip);
+          eu2.set(th.rotation.x + kn.rotation.x, th.rotation.y, th.rotation.z);
+          const ankle = chain[n++].set(0, -0.43, 0).applyEuler(eu2).add(kneeP);
+          chain[n++].set(0, 0.06, 0.2).applyEuler(eu2).add(ankle);
+        }
+        for (let k = 0; k < n; k++) chain[k].applyMatrix4(inv);
+        const R = 0.1; // leg + boot radius with a little air
+        for (let v = 0; v < pos.count; v++) {
+          const bx = skirtBase[v * 3];
+          const by = skirtBase[v * 3 + 1];
+          const bz = skirtBase[v * 3 + 2];
+          const r0 = Math.hypot(bx, bz);
+          let r = r0;
+          if (r0 > 1e-4 && by < -0.04) {
+            const dx = bx / r0;
+            const dz = bz / r0;
+            for (let leg = 0; leg < n; leg += 4) {
+              for (let sgm = 0; sgm < 3; sgm++) {
+                const A = chain[leg + sgm];
+                const B = chain[leg + sgm + 1];
+                const lo = Math.min(A.y, B.y);
+                const hi = Math.max(A.y, B.y);
+                if (by < lo - R || by > hi + R) continue;
+                const u = hi - lo < 1e-4 ? 0 : THREE.MathUtils.clamp((by - A.y) / (B.y - A.y), 0, 1);
+                const cx = A.x + (B.x - A.x) * u;
+                const cz = A.z + (B.z - A.z) * u;
+                // support distance of the leg disc along this vertex's direction
+                const need = cx * dx + cz * dz + R;
+                if (need > r) r = need;
+              }
+            }
+          }
+          const k = r / Math.max(r0, 1e-4);
+          arr[v * 3] = bx * k;
+          arr[v * 3 + 2] = bz * k;
+        }
+        pos.needsUpdate = true;
+        sm.geometry.computeVertexNormals();
+        cloth.current.wasDeformed = true;
+      } else if (cloth.current.wasDeformed) {
+        arr.set(skirtBase);
+        pos.needsUpdate = true;
+        sm.geometry.computeVertexNormals();
+        cloth.current.wasDeformed = false;
+      }
     }
 
     // glance around now and then when standing
@@ -301,10 +489,12 @@ export const Human = forwardRef<HumanHandle, HumanLook>(function Human(
   });
 
   const legs = [0.1, -0.1];
-  const arms = [0.205, -0.205];
+  const arms = woman ? [0.19, -0.19] : [0.205, -0.205];
+  const headwear = hatStyle ?? (woman ? 'scarf' : hat ? 'malgai' : 'none');
+  const hairStyle = hair ?? (woman ? 'braid' : 'short');
 
   return (
-    <group>
+    <group scale={woman ? 0.96 : 1}>
       <group ref={hips} position-y={HIP_Y}>
         {/* legs: trousers + гутал boots with upturned toes */}
         {legs.map((x, i) => (
@@ -337,7 +527,7 @@ export const Human = forwardRef<HumanHandle, HumanLook>(function Human(
 
         {/* deel skirt hangs from the waist */}
         <group ref={skirt}>
-          <mesh geometry={g.lower} material={m.deel} castShadow />
+          <mesh ref={skirtMesh} geometry={g.lower} material={m.deel} castShadow />
           <mesh position-y={-0.765} rotation-x={Math.PI / 2} material={m.trim}>
             <torusGeometry args={[0.302, 0.013, 4, 32]} />
           </mesh>
@@ -405,6 +595,7 @@ export const Human = forwardRef<HumanHandle, HumanLook>(function Human(
                 <mesh position-y={-0.21} geometry={g.cuff} material={m.trim} />
                 {/* hand */}
                 <group position-y={-0.3}>
+                  {i === 1 && rightHand}
                   <mesh scale={[0.034, 0.05, 0.022]} material={m.skin}>
                     <sphereGeometry args={[1, 10, 8]} />
                   </mesh>
@@ -467,17 +658,32 @@ export const Human = forwardRef<HumanHandle, HumanLook>(function Human(
                 <sphereGeometry args={[1, 16, 10]} />
               </mesh>
 
-              {woman ? (
-                <>
-                  {/* braid, silver earrings and a tied headscarf (алчуур) */}
-                  <mesh position={[0, -0.16, -0.085]} rotation-x={0.12} material={m.hair}>
-                    <capsuleGeometry args={[0.02, 0.3, 4, 8]} />
-                  </mesh>
-                  {[1, -1].map((sd) => (
-                    <mesh key={sd} position={[sd * 0.1, -0.035, 0.0]} material={m.silver}>
-                      <sphereGeometry args={[0.009, 8, 6]} />
+              {/* hair: men short; women one long braid or two braids (хоёр гэзэг) */}
+              {hairStyle === 'braid' && (
+                <mesh position={[0, -0.16, -0.085]} rotation-x={0.12} material={m.hair}>
+                  <capsuleGeometry args={[0.02, 0.3, 4, 8]} />
+                </mesh>
+              )}
+              {hairStyle === 'twobraids' &&
+                [1, -1].map((sd) => (
+                  <group key={sd}>
+                    <mesh position={[sd * 0.075, -0.17, 0.0]} rotation={[0.05, 0, sd * -0.08]} material={m.hair}>
+                      <capsuleGeometry args={[0.017, 0.26, 4, 8]} />
                     </mesh>
-                  ))}
+                    <mesh position={[sd * 0.082, -0.33, 0.005]} material={m.silver}>
+                      <cylinderGeometry args={[0.02, 0.02, 0.03, 10]} />
+                    </mesh>
+                  </group>
+                ))}
+              {woman &&
+                [1, -1].map((sd) => (
+                  <mesh key={sd} position={[sd * 0.1, -0.035, 0.0]} material={m.silver}>
+                    <sphereGeometry args={[0.009, 8, 6]} />
+                  </mesh>
+                ))}
+              {headwear === 'scarf' && (
+                <>
+                  {/* алчуур: headscarf tied at the back */}
                   <mesh position={[0, 0.04, -0.022]} rotation-x={-0.35} scale={[0.108, 0.112, 0.112]} material={m.scarf}>
                     <sphereGeometry args={[1, 18, 12, 0, Math.PI * 2, 0, Math.PI * 0.42]} />
                   </mesh>
@@ -485,31 +691,49 @@ export const Human = forwardRef<HumanHandle, HumanLook>(function Human(
                     <coneGeometry args={[0.04, 0.1, 8]} />
                   </mesh>
                 </>
-              ) : (
-                hat && (
-                  <group position-y={0.08}>
-                    {/* малгай: fur-lined upturned brim, domed red crown, gold knot (жинс) and ribbons */}
-                    <mesh position-y={-0.005} material={m.fur}>
-                      <cylinderGeometry args={[0.135, 0.118, 0.06, 20]} />
+              )}
+              {headwear === 'malgai' && (
+                <group position-y={0.08}>
+                  {/* малгай: fur-lined upturned brim, domed crown, gold knot (жинс) and ribbons */}
+                  <mesh position-y={-0.005} material={m.fur}>
+                    <cylinderGeometry args={[0.135, 0.118, 0.06, 20]} />
+                  </mesh>
+                  <mesh position-y={0.02} scale={[0.112, 0.12, 0.112]} material={m.hatRed}>
+                    <sphereGeometry args={[1, 18, 10, 0, Math.PI * 2, 0, Math.PI / 2]} />
+                  </mesh>
+                  {[0.04, 0.075].map((y) => (
+                    <mesh key={y} position-y={y} rotation-x={Math.PI / 2} material={m.trim}>
+                      <torusGeometry args={[0.112 - (y - 0.02) * 0.6, 0.004, 4, 20]} />
                     </mesh>
-                    <mesh position-y={0.02} scale={[0.112, 0.12, 0.112]} material={m.hatRed}>
-                      <sphereGeometry args={[1, 18, 10, 0, Math.PI * 2, 0, Math.PI / 2]} />
+                  ))}
+                  <mesh position-y={0.148} material={m.trim}>
+                    <sphereGeometry args={[0.022, 10, 8]} />
+                  </mesh>
+                  {[1, -1].map((sd) => (
+                    <mesh key={sd} position={[sd * 0.025, -0.06, -0.12]} rotation={[0.25, 0, sd * 0.08]} material={m.hatRed}>
+                      <boxGeometry args={[0.022, 0.16, 0.004]} />
                     </mesh>
-                    {[0.04, 0.075].map((y) => (
-                      <mesh key={y} position-y={y} rotation-x={Math.PI / 2} material={m.trim}>
-                        <torusGeometry args={[0.112 - (y - 0.02) * 0.6, 0.004, 4, 20]} />
-                      </mesh>
-                    ))}
-                    <mesh position-y={0.148} material={m.trim}>
-                      <sphereGeometry args={[0.022, 10, 8]} />
+                  ))}
+                </group>
+              )}
+              {headwear === 'toortsog' && (
+                <group position-y={0.075}>
+                  {/* тоорцог: round quilted cap with a narrow fur band and a knot on top */}
+                  <mesh position-y={-0.01} material={m.fur}>
+                    <cylinderGeometry args={[0.122, 0.118, 0.04, 20]} />
+                  </mesh>
+                  <mesh position-y={0.0} scale={[0.118, 0.1, 0.118]} material={m.hatRed}>
+                    <sphereGeometry args={[1, 18, 10, 0, Math.PI * 2, 0, Math.PI / 2]} />
+                  </mesh>
+                  {Array.from({ length: 8 }, (_, k) => (
+                    <mesh key={k} position-y={0.05} rotation-y={(k / 8) * Math.PI} material={m.trim}>
+                      <torusGeometry args={[0.1, 0.0025, 3, 16, Math.PI]} />
                     </mesh>
-                    {[1, -1].map((sd) => (
-                      <mesh key={sd} position={[sd * 0.025, -0.06, -0.12]} rotation={[0.25, 0, sd * 0.08]} material={m.hatRed}>
-                        <boxGeometry args={[0.022, 0.16, 0.004]} />
-                      </mesh>
-                    ))}
-                  </group>
-                )
+                  ))}
+                  <mesh position-y={0.105} material={m.trim}>
+                    <sphereGeometry args={[0.018, 10, 8]} />
+                  </mesh>
+                </group>
               )}
             </group>
           </group>
