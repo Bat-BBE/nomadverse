@@ -222,6 +222,29 @@ const LOOSE_HOME = { x: 10, z: -24 };
 /** shared with the player (shearing target, objective marker) */
 export const herd: HerdSheep[] = [];
 
+function buildHerd(N: number, alreadyPenned: number, shorn: number) {
+  herd.length = 0;
+  for (let i = 0; i < N; i++) {
+    const resident = i < 2;
+    const inPen = resident || i - 2 < alreadyPenned;
+    const a = i * 2.3;
+    const r = inPen ? 1 + (i % 3) * 1.1 : 1.5 + (i % 3) * 1.4;
+    const cx = inPen ? PEN.x : LOOSE_HOME.x;
+    const cz = inPen ? PEN.z : LOOSE_HOME.z;
+    herd.push({
+      x: cx + Math.cos(a) * r,
+      z: cz + Math.sin(a) * r,
+      heading: a,
+      phase: i,
+      stride: 0,
+      resident,
+      sheared: resident && i < shorn,
+      penned: inPen,
+      goat: i === 4,
+    });
+  }
+}
+
 export function Herd() {
   const bodies = useRef<THREE.InstancedMesh>(null);
   const heads = useRef<THREE.InstancedMesh>(null);
@@ -230,33 +253,17 @@ export function Herd() {
   const N = 7;
 
   const phase = useGame((st) => st.phase);
-  // (re)build the herd when a journey starts, so a loaded save's penned sheep are in the pen
+  const day = useGame((st) => st.day);
+  // (re)build the herd when a journey starts, so a loaded save's penned sheep are in the pen;
+  // each new morning the flock is out on the pasture again and the residents' wool has grown
+  const built = useRef({ phase: '', day: 0 });
   useMemo(() => {
-    if (phase !== 'title' && phase !== 'entering') return;
-    herd.length = 0;
+    const fresh = built.current.day !== 0 && day !== built.current.day && phase === 'play';
+    if (!fresh && phase !== 'title' && phase !== 'entering') return;
+    built.current = { phase, day };
     const s = useGame.getState();
-    const alreadyPenned = Math.min(5, s.penned);
-    const shorn = s.activitiesDone.includes('shearing') ? 1 : 0;
-    for (let i = 0; i < N; i++) {
-      const resident = i < 2;
-      const inPen = resident || i - 2 < alreadyPenned;
-      const a = i * 2.3;
-      const r = inPen ? 1 + (i % 3) * 1.1 : 1.5 + (i % 3) * 1.4;
-      const cx = inPen ? PEN.x : LOOSE_HOME.x;
-      const cz = inPen ? PEN.z : LOOSE_HOME.z;
-      herd.push({
-        x: cx + Math.cos(a) * r,
-        z: cz + Math.sin(a) * r,
-        heading: a,
-        phase: i,
-        stride: 0,
-        resident,
-        sheared: resident && i < shorn,
-        penned: inPen,
-        goat: i === 4,
-      });
-    }
-  }, [phase]);
+    buildHerd(N, fresh ? 0 : Math.min(5, s.penned), !fresh && s.activitiesDone.includes('shearing') ? 1 : 0);
+  }, [phase, day]);
 
   useLayoutEffect(() => {
     const c = new THREE.Color();
@@ -414,6 +421,8 @@ export function Herd() {
     if (s.phase === 'play') {
       s.setPenned(penned);
       if (penned >= 5 && s.steps['herd.talk']) s.complete('herd', 'drive');
+      // the daily chore: all five back in the pen and the gate shut behind them
+      if (penned >= 5 && !s.gateOpen && s.chores.some((c) => c.id === 'herd' && !c.done)) s.chore('herd');
     }
   });
 

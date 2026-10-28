@@ -1969,8 +1969,8 @@ kbd {
   inset: 0;
   pointer-events: none;
   background:
-    linear-gradient(90deg, rgba(6, 9, 18, 0.82) 0%, rgba(6, 9, 18, 0.55) 30%, rgba(6, 9, 18, 0.08) 58%, transparent 75%),
-    linear-gradient(180deg, transparent 60%, rgba(6, 9, 18, 0.55));
+    radial-gradient(120% 90% at 0% 50%, rgba(8, 12, 24, 0.62) 0%, rgba(8, 12, 24, 0.38) 32%, rgba(8, 12, 24, 0.08) 55%, transparent 70%),
+    linear-gradient(180deg, transparent 72%, rgba(8, 12, 24, 0.32));
 }
 
 .t-sun {
@@ -1981,7 +1981,7 @@ kbd {
   height: 60vw;
   pointer-events: none;
   border-radius: 50%;
-  background: radial-gradient(circle, rgba(255, 214, 150, 0.32), rgba(255, 190, 120, 0.12) 35%, transparent 65%);
+  background: radial-gradient(circle, rgba(255, 228, 170, 0.34), rgba(255, 205, 140, 0.12) 35%, transparent 65%);
   mix-blend-mode: screen;
   animation: sunbreath 9s ease-in-out infinite;
 }
@@ -2136,6 +2136,7 @@ kbd {
   margin: 14px 0 6px;
   font: italic 500 clamp(1.15rem, 2vw, 1.5rem) var(--font-display);
   color: var(--gold-soft);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6), 0 2px 16px rgba(0, 0, 0, 0.4);
 }
 
 .t-lede {
@@ -2143,7 +2144,8 @@ kbd {
   max-width: 440px;
   font-size: 0.92rem;
   line-height: 1.6;
-  color: rgba(244, 238, 226, 0.72);
+  color: rgba(248, 243, 233, 0.9);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.55), 0 2px 18px rgba(0, 0, 0, 0.45);
 }
 
 .t-menu {
@@ -2227,6 +2229,7 @@ kbd {
 .t-label {
   display: grid;
   gap: 2px;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6), 0 2px 14px rgba(0, 0, 0, 0.4);
 }
 
 .t-label strong {
@@ -2240,7 +2243,7 @@ kbd {
 
 .t-label small {
   font-size: 0.74rem;
-  color: var(--muted);
+  color: rgba(244, 238, 226, 0.82);
 }
 
 .t-foot {
@@ -2274,7 +2277,8 @@ kbd {
   font-size: 0.68rem;
   letter-spacing: 0.24em;
   text-transform: uppercase;
-  color: rgba(251, 247, 238, 0.7);
+  color: rgba(251, 247, 238, 0.85);
+  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.6);
 }
 
 .t-pillars i {
@@ -2309,7 +2313,7 @@ kbd {
 
 @media (max-width: 760px) {
   .t-shade {
-    background: linear-gradient(180deg, rgba(6, 9, 18, 0.55), rgba(6, 9, 18, 0.15) 35%, rgba(6, 9, 18, 0.7) 70%, rgba(6, 9, 18, 0.9));
+    background: linear-gradient(180deg, rgba(8, 12, 24, 0.3), transparent 30%, rgba(8, 12, 24, 0.45) 62%, rgba(8, 12, 24, 0.82));
   }
   .t-block {
     left: 20px;
@@ -2377,5 +2381,480 @@ kbd {
   .t-sun,
   .motes span {
     animation: none;
+  }
+}
+
+/* ================================================================ daily life, stars, Naadam */
+
+.quest {
+  max-height: calc(100vh - 2 * var(--gap) - var(--sat) - var(--sab) - 120px);
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+
+.chores {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--gold-line);
+}
+
+.chores-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.chores-count {
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--gold-soft);
+}
+
+.quest .chores ul {
+  border-top: none;
+  padding-top: 8px;
+}
+
+.quest .chores li {
+  align-items: flex-start;
+}
+
+.quest .chores .check {
+  margin-top: 3px;
+  border-radius: 50%;
+}
+
+.quest .chores li.done .check::after {
+  left: 3px;
+  top: 0.5px;
+}
+
+.chores .label small {
+  display: block;
+  font-size: 0.74rem;
+  color: var(--muted);
+}
+
+.chores-done {
+  margin: 8px 0 0 !important;
+  color: var(--gold-soft) !important;
+}
+
+/* activity rating */
+.stars {
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+  margin: 2px 0 0;
+  font-size: 2.4rem;
+  line-height: 1;
+}
+
+.stars span {
+  display: inline-block;
+  color: rgba(244, 238, 226, 0.16);
+}
+
+.stars span.on {
+  color: #f3c45a;
+  text-shadow:
+    0 0 18px rgba(243, 196, 90, 0.65),
+    0 2px 0 #9a6a1a;
+}
+
+.verdict {
+  margin: 6px 0 4px !important;
+  text-align: center;
+  font: 600 1.1rem var(--font-display);
+  color: var(--gold-soft);
+}
+
+.reward.bonus {
+  border-color: #f3c45a;
+  background: rgba(243, 196, 90, 0.2);
+  color: #ffe2a0;
+}
+
+.mastery {
+  margin: 4px 0 12px;
+}
+
+.mastery-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+  font-size: 0.85rem;
+}
+
+.mastery-head b {
+  color: var(--gold-soft);
+}
+
+.mastery-head small {
+  color: var(--muted);
+  font-size: 0.74rem;
+}
+
+.meter.thin {
+  height: 6px;
+  margin: 6px 0 0;
+}
+
+.meter-fill.gold {
+  background: linear-gradient(90deg, #b8862e, #f3c45a);
+}
+
+/* journal: skills */
+.skills {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.skill {
+  display: grid;
+  gap: 2px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: rgba(244, 238, 226, 0.03);
+}
+
+.skill strong {
+  font-size: 0.86rem;
+}
+
+.skill-stars {
+  color: #f3c45a;
+  letter-spacing: 0.12em;
+  font-size: 0.9rem;
+}
+
+.skill small {
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+
+.skill.locked {
+  opacity: 0.45;
+}
+
+/* race HUD */
+.race-hud {
+  position: absolute;
+  top: calc(var(--gap) + var(--sat) + 60px);
+  right: calc(var(--gap) + var(--sar));
+  display: flex;
+  gap: 4px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  pointer-events: none;
+}
+
+.race-hud > div {
+  display: grid;
+  justify-items: center;
+  min-width: 64px;
+  padding: 0 8px;
+}
+
+.race-hud > div + div {
+  border-left: 1px solid var(--line);
+}
+
+.race-hud small {
+  font-size: 0.64rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.race-hud b {
+  font: 600 1.35rem/1.25 var(--font-ui);
+  color: var(--gold-soft);
+  font-variant-numeric: tabular-nums;
+}
+
+.race-hud b i {
+  font-style: normal;
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+
+.race-clock span {
+  font: 600 1.3rem/1.35 var(--font-ui);
+  font-variant-numeric: tabular-nums;
+}
+
+.race-count {
+  position: absolute;
+  top: 34%;
+  left: 0;
+  right: 0;
+  text-align: center;
+  pointer-events: none;
+  font: 400 clamp(5rem, 16vw, 9rem) / 1 var(--font-brush);
+  color: #fbf7ee;
+  text-shadow:
+    0 4px 0 rgba(0, 0, 0, 0.25),
+    0 10px 60px rgba(0, 0, 0, 0.55);
+}
+
+.race-count.go {
+  font-size: clamp(3rem, 10vw, 6rem);
+  color: #ffd27a;
+}
+
+/* race result */
+.race-result {
+  text-align: center;
+}
+
+.race-result .row,
+.race-result .reward-row {
+  justify-content: center;
+}
+
+.place {
+  display: inline-flex;
+  align-items: baseline;
+  justify-content: center;
+  width: 108px;
+  height: 108px;
+  margin: 8px auto 4px;
+  padding-top: 18px;
+  border-radius: 50%;
+  border: 2px solid var(--gold-line);
+  background: radial-gradient(circle at 50% 35%, rgba(217, 169, 78, 0.35), rgba(14, 21, 37, 0.6));
+}
+
+.place span {
+  font: 700 3rem/1 var(--font-ui);
+  color: var(--gold-soft);
+}
+
+.place small {
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.place-1 {
+  border-color: #f3c45a;
+  box-shadow:
+    0 0 40px rgba(243, 196, 90, 0.45),
+    inset 0 0 20px rgba(243, 196, 90, 0.25);
+}
+
+.place-1 span {
+  color: #ffe08a;
+}
+
+@media (max-width: 760px) {
+  .race-hud {
+    top: calc(var(--gap) + var(--sat) + 52px);
+    padding: 6px 4px;
+  }
+  .race-hud > div {
+    min-width: 50px;
+    padding: 0 5px;
+  }
+  .race-hud b {
+    font-size: 1.25rem;
+  }
+  .race-clock span {
+    font-size: 1rem;
+  }
+  .stars {
+    font-size: 2rem;
+  }
+}
+
+/* ================================================================ insight, order puzzle, meaning, requests */
+
+.insight {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 12px;
+  align-items: start;
+  margin: 4px 0 10px;
+  padding: 14px 16px;
+  border-radius: 6px;
+  border: 1px solid var(--gold-line);
+  background: linear-gradient(135deg, rgba(217, 169, 78, 0.16), rgba(217, 169, 78, 0.04));
+}
+
+.insight-mark {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: var(--gold);
+  color: var(--ink);
+  font-weight: 800;
+}
+
+.insight p {
+  margin: 2px 0 0 !important;
+  font: italic 500 1.02rem/1.5 var(--font-display);
+  color: #f6ead0;
+}
+
+.insight button {
+  grid-column: 2;
+  justify-self: end;
+  margin-top: 8px;
+}
+
+.choice.wrong {
+  opacity: 0.4;
+  text-decoration: line-through;
+  text-decoration-color: rgba(220, 120, 90, 0.7);
+}
+
+.order-slots {
+  margin: 0 0 12px;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 6px;
+}
+
+.order-slots li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 34px;
+  padding: 4px 10px;
+  border-radius: 4px;
+  border: 1px dashed var(--line);
+  font-size: 0.88rem;
+}
+
+.order-slots li b {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 1px solid var(--gold-line);
+  font-size: 0.74rem;
+  color: var(--gold-soft);
+}
+
+.order-slots li.filled {
+  border-style: solid;
+  border-color: var(--gold-line);
+  background: rgba(217, 169, 78, 0.1);
+}
+
+.order-slots li.filled b {
+  background: var(--gold);
+  color: var(--ink);
+}
+
+.order-slots li.next {
+  border-color: var(--gold);
+  box-shadow: 0 0 0 1px rgba(217, 169, 78, 0.3);
+}
+
+.order-blank {
+  flex: 1;
+  height: 1px;
+  background: var(--line);
+}
+
+.order-pool {
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+}
+
+.meaning {
+  margin: 4px 0 12px;
+  padding: 12px 14px 4px;
+  border-left: 3px solid var(--gold);
+  background: rgba(244, 238, 226, 0.04);
+}
+
+.meaning p {
+  margin: 6px 0 8px !important;
+  font-size: 0.9rem;
+  line-height: 1.6;
+}
+
+.meaning .blessing {
+  font: italic 500 1.05rem/1.5 var(--font-display);
+  color: var(--gold-soft);
+}
+
+.request {
+  margin-top: 10px;
+  padding: 8px 10px;
+  border-radius: 4px;
+  border: 1px solid var(--gold-line);
+  background: rgba(217, 169, 78, 0.08);
+}
+
+.request.done {
+  opacity: 0.65;
+}
+
+.request-items {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  margin-top: 6px;
+  font-size: 0.8rem;
+}
+
+.request-items span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+}
+
+.request-items span.ok {
+  color: var(--gold-soft);
+}
+
+.request-items i {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+
+.request small {
+  display: block;
+  margin-top: 4px;
+  font-size: 0.74rem;
+  color: var(--gold-soft);
+}
+
+.choices.order-pool {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.order-pool .choice {
+  padding: 8px 10px;
+  font-size: 0.84rem;
+}
+
+.order-slots {
+  gap: 4px;
+}
+
+.order-slots li {
+  min-height: 30px;
+  padding: 3px 10px;
+}
+
+@media (max-width: 520px) {
+  .choices.order-pool {
+    grid-template-columns: 1fr;
   }
 }

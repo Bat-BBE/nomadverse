@@ -2,7 +2,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { activeQuest, isDone, useGame, world } from '@/game/store';
-import { CHEST_ITEMS, INFO, INFO_CATS, ITEM_CAT_LABEL, ITEMS, NPCS, QUESTS } from '@/game/content';
+import { CHEST_ITEMS, CHORES, honorTitle, INFO, INFO_CATS, ITEM_CAT_LABEL, ITEMS, masteryLevel, NPCS, QUESTS, REQUESTS } from '@/game/content';
+import { ACTIVITIES } from '@/game/activities';
+import { GATES, LAPS, PLACE_NAMES, PLACE_TEXT, race, standing, startRace, START } from '@/game/race';
 import { dialogueFor } from '@/game/dialogue';
 import { keys, onPress, press } from '@/game/input';
 import { audio } from '@/game/audio';
@@ -70,11 +72,149 @@ function QuestPanel() {
             </ul>
           </>
         ) : (
-          <p>Бүх даалгавар биелсэн. Хөндийгөөр чөлөөтэй аялж, үдшийн тэнгэрийг ажигла.</p>
+          <p>Бүх даалгавар биелсэн. Өдөр бүрийн ажлаа хийж, Наадмын уралдаанд түрүүлэхийг хичээ.</p>
         ))}
+      {open && <ChoreList />}
     </motion.aside>
   );
 }
+
+/** Today's chores: everyday work that returns each morning. */
+function ChoreList() {
+  const chores = useGame((s) => s.chores);
+  const day = useGame((s) => s.day);
+  const request = useGame((s) => s.request);
+  useGame((s) => s.inventory); // re-render as you gather what was asked for
+  const req = REQUESTS.find((r) => r.id === request?.id);
+  if (!chores.length && !req) return null;
+  const left = chores.filter((c) => !c.done).length;
+  return (
+    <div className="chores">
+      <div className="chores-head">
+        <span className="eyebrow">{day}-р өдөр · Өдрийн ажил</span>
+        <span className="chores-count">
+          {chores.length - left}/{chores.length}
+        </span>
+      </div>
+      <ul>
+        {chores.map((c) => (
+          <li key={c.id} className={c.done ? 'done' : ''}>
+            <span className="check" />
+            <span className="label">
+              {CHORES[c.id].title}
+              {!c.done && <small>{CHORES[c.id].hint}</small>}
+            </span>
+          </li>
+        ))}
+      </ul>
+      {left === 0 && chores.length > 0 && <p className="chores-done">Бүгд биеллээ. Гэртээ орж амраад шинэ өдрийг угтаарай.</p>}
+      {req && (
+        <div className={`request ${request?.done ? 'done' : ''}`}>
+          <span className="eyebrow">Айлын хүсэлт · {NPCS[req.npc].name}</span>
+          <div className="request-items">
+            {Object.entries(req.needs).map(([k, n]) => {
+              const have = Math.min(n, useGame.getState().inventory[k] ?? 0);
+              return (
+                <span key={k} className={have >= n || request?.done ? 'ok' : ''}>
+                  <i style={{ background: ITEMS[k]?.color }} />
+                  {ITEMS[k]?.name} {request?.done ? n : have}/{n}
+                </span>
+              );
+            })}
+          </div>
+          {request?.done && <small>Барьчихлаа · +{req.honor} нэр хүнд</small>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+const fmtTime = (t: number) => `${Math.floor(t / 60)}:${(t % 60).toFixed(1).padStart(4, '0')}`;
+
+/** Race HUD: countdown, lap, gate, standing and the clock. */
+function RaceHud() {
+  const racing = useGame((s) => s.racing);
+  const [count, setCount] = useState<string | null>(null);
+  const [info, setInfo] = useState({ lap: 1, gate: 0, place: 1 });
+  const clock = useRef<HTMLSpanElement>(null);
+  useEffect(() => {
+    if (!racing) return;
+    let raf = 0;
+    let last: string | null = null;
+    const tick = () => {
+      raf = requestAnimationFrame(tick);
+      // "3, 2, 1" then the jockeys' cry as they jump off the line
+      const c =
+        race.state === 'count'
+          ? race.t < 3 ? String(3 - Math.floor(race.t)) : 'Гийнгоо!'
+          : race.state === 'run' && race.time < 1.1
+            ? 'Гийнгоо!'
+            : null;
+      if (c !== last) {
+        last = c;
+        setCount(c);
+      }
+      const p = world.player;
+      const next = {
+        lap: Math.min(LAPS, Math.floor(race.gate / GATES) + 1),
+        gate: race.gate % GATES,
+        place: race.state === 'count' ? RACE_FIELD : standing(p.x, p.z),
+      };
+      setInfo((o) => (o.lap === next.lap && o.gate === next.gate && o.place === next.place ? o : next));
+      if (clock.current) clock.current.textContent = fmtTime(race.state === 'count' ? 0 : race.time);
+    };
+    tick();
+    return () => cancelAnimationFrame(raf);
+  }, [racing]);
+  if (!racing) return null;
+  return (
+    <>
+      <motion.div className="race-hud panel" {...fade}>
+        <div>
+          <small>Байр</small>
+          <b>
+            {info.place}
+            <i>/{RACE_FIELD}</i>
+          </b>
+        </div>
+        <div>
+          <small>Тойрог</small>
+          <b>
+            {info.lap}
+            <i>/{LAPS}</i>
+          </b>
+        </div>
+        <div>
+          <small>Хаалга</small>
+          <b>
+            {info.gate}
+            <i>/{GATES}</i>
+          </b>
+        </div>
+        <div className="race-clock">
+          <small>Хугацаа</small>
+          <span ref={clock}>0:00.0</span>
+        </div>
+      </motion.div>
+      <AnimatePresence>
+        {count && (
+          <motion.div
+            key={count}
+            className={`race-count ${count.length > 1 ? 'go' : ''}`}
+            initial={{ opacity: 0, scale: 1.8 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.7 }}
+            transition={{ duration: 0.35 }}
+          >
+            {count}
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </>
+  );
+}
+
+const RACE_FIELD = 4; // you and three other riders
 
 function TopBar() {
   const xp = useGame((s) => s.xp);
@@ -424,6 +564,11 @@ function JournalModal() {
   const order = useGame((s) => s.questOrder);
   const xp = useGame((s) => s.xp);
   const acts = useGame((s) => s.activitiesDone);
+  const mastery = useGame((s) => s.mastery);
+  const records = useGame((s) => s.records);
+  const day = useGame((s) => s.day);
+  const streak = useGame((s) => s.streak);
+  const honor = useGame((s) => s.honor);
   const [sel, setSel] = useState<string | null>(null);
   if (sel) return <InfoCard id={sel} onBack={() => setSel(null)} />;
   const learned = (k: string) => !!steps[`info.${k}`];
@@ -439,8 +584,33 @@ function JournalModal() {
         <span><b>{questsDone.length}</b>/{QUESTS.length} даалгавар</span>
         <span><b>{acts.length}</b> ажил</span>
         <span><b>{count}</b>/{total} мэдлэг</span>
+        <span><b>{day}</b>-р өдөр</span>
+        <span title="Айлуудад туслахад өснө">Нэр хүнд: <b>{honorTitle(honor).label}</b> ({honor})</span>
+        {streak > 1 && <span><b>{streak}</b> өдөр дараалан</span>}
       </div>
       <div className="rule" />
+      <h4>Ур чадвар</h4>
+      <div className="skills">
+        {Object.values(ACTIVITIES).map((a) => {
+          const m = mastery[a.id];
+          const lv = masteryLevel(m?.times ?? 0);
+          return (
+            <div key={a.id} className={`skill ${m ? '' : 'locked'}`}>
+              <strong>{a.title}</strong>
+              <span className="skill-stars">{[0, 1, 2].map((i) => (i < (m?.best ?? 0) ? '★' : '☆')).join('')}</span>
+              <small>
+                {lv.label}
+                {m ? ` · ${m.times} удаа` : ''}
+              </small>
+            </div>
+          );
+        })}
+        <div className={`skill ${records.races ? '' : 'locked'}`}>
+          <strong>Наадмын уралдаан</strong>
+          <span className="skill-stars">{records.wins ? `${records.wins} түрүү` : '—'}</span>
+          <small>{records.races ? `${records.races} уралдаан · ${records.best ? fmtTime(records.best) : ''}` : 'Морио унаад гарааны хаалган дээр оч'}</small>
+        </div>
+      </div>
       <ol className="journey">
         {order.map((id, i) => {
           const q = QUESTS.find((x) => x.id === id)!;
@@ -478,6 +648,55 @@ function JournalModal() {
           </div>
         </div>
       ))}
+    </div>
+  );
+}
+
+function RaceResultCard() {
+  const r = useGame((s) => s.raceResult);
+  const records = useGame((s) => s.records);
+  if (!r) return null;
+  const again = () => {
+    useGame.getState().setModal(null);
+    const p = world.player;
+    if (useGame.getState().mounted && Math.hypot(p.x - START.x, p.z - START.z) < 40) startRace();
+    else useGame.getState().toast('Гарааны шугам руу оч', 'Морьтойгоо гарааны хаалган дээр E дар');
+  };
+  return (
+    <div className="info race-result">
+      <div className="eyebrow">Naadam horse race</div>
+      <motion.div className={`place place-${r.place}`} initial={{ scale: 0.4, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} transition={{ type: 'spring', stiffness: 260, damping: 15 }}>
+        <span>{r.place}</span>
+        <small>-р байр</small>
+      </motion.div>
+      <h3>{PLACE_NAMES[r.place - 1]}</h3>
+      <div className="rule" />
+      <p>{PLACE_TEXT[r.place - 1]}</p>
+      <div className="reward-row">
+        <span className="reward">Хугацаа: {fmtTime(r.time)}</span>
+        {r.best && <span className="reward bonus">Шинэ дээд амжилт!</span>}
+        {r.place === 1 && (
+          <span className="reward">
+            <i style={{ background: ITEMS.medal.color }} />
+            {ITEMS.medal.name}
+          </span>
+        )}
+        <span className="reward xp">+{r.xp} XP</span>
+      </div>
+      <p className="note">
+        Нийт {records.races} уралдаан · {records.wins} түрүү · Шилдэг хугацаа {records.best ? fmtTime(records.best) : '—'}
+      </p>
+      <div className="row">
+        <button className="ghost" onClick={() => useGame.getState().learn('uraldaan', true)}>
+          Морин уралдааны тухай
+        </button>
+        <button className="ghost" onClick={again}>
+          Дахин уралдах
+        </button>
+        <button className="primary" onClick={() => useGame.getState().setModal(null)}>
+          Болсон
+        </button>
+      </div>
     </div>
   );
 }
@@ -554,6 +773,7 @@ function Modals() {
             {modal.type === 'activity' && <ActivityPanel />}
             {modal.type === 'inventory' && <Inventory />}
             {modal.type === 'journal' && <JournalModal />}
+            {modal.type === 'race' && <RaceResultCard />}
           </motion.div>
         </motion.div>
       )}
@@ -591,6 +811,7 @@ export function Overlay() {
       {phase === 'play' && (
         <>
           <QuestPanel />
+          <RaceHud />
           <TopBar />
           <CompassBar />
           <Prompt />

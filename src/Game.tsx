@@ -1,24 +1,34 @@
-'use client';
-import { Suspense, useEffect, useState } from 'react';
-import { Canvas, useThree } from '@react-three/fiber';
-import { Bloom, BrightnessContrast, EffectComposer, N8AO, ToneMapping, Vignette } from '@react-three/postprocessing';
-import { ToneMappingMode } from 'postprocessing';
-import * as THREE from 'three';
-import { getQuality, useGame, world } from '@/game/store';
-import { bindKeys } from '@/game/input';
-import { Lights, Sky } from '@/world/Sky';
-import { Mountains, Terrain } from '@/world/Terrain';
-import { Clouds, Flowers, Grass, River, Scatter } from '@/world/Nature';
-import { Camp, Ovoo } from '@/world/Ger';
-import { Camels, Flock, PastureHorses } from '@/world/Animals';
-import { cam, Player } from '@/world/Player';
-import { Interior } from '@/world/Interior';
-import { icam } from '@/world/InteriorPlayer';
-import { Villagers } from '@/world/Npc';
-import { Cattle, Herd, herd } from '@/world/Livestock';
-import { Dog, Eagle, Herder } from '@/world/Life';
-import { Director } from '@/world/Director';
-import { Overlay } from '@/ui/Overlay';
+"use client";
+import { Suspense, useEffect, useState } from "react";
+import { Canvas, useThree } from "@react-three/fiber";
+import {
+  Bloom,
+  BrightnessContrast,
+  EffectComposer,
+  N8AO,
+  ToneMapping,
+  Vignette,
+} from "@react-three/postprocessing";
+import { ToneMappingMode } from "postprocessing";
+import * as THREE from "three";
+import { getQuality, useGame, world } from "@/game/store";
+import { bindKeys } from "@/game/input";
+import { Lights, Sky } from "@/world/Sky";
+import { Mountains, Terrain } from "@/world/Terrain";
+import { Clouds, Flowers, Grass, River, Scatter } from "@/world/Nature";
+import { Camp, Ovoo } from "@/world/Ger";
+import { Camels, Flock, PastureHorses } from "@/world/Animals";
+import { cam, Player } from "@/world/Player";
+import { Interior } from "@/world/Interior";
+import { icam } from "@/world/InteriorPlayer";
+import { Villagers } from "@/world/Npc";
+import { Cattle, Herd, herd } from "@/world/Livestock";
+import { Dog, Eagle, Herder } from "@/world/Life";
+import { Director } from "@/world/Director";
+import { Naadam } from "@/world/Naadam";
+import { ArgalPatches } from "@/world/Steppe";
+import { Overlay } from "@/ui/Overlay";
+import { gatePoint, race } from "@/game/race";
 
 /** Debug: expose the R3F camera/scene for automated playtests (window.__nv.three). */
 function DebugHandle() {
@@ -33,7 +43,7 @@ function DebugHandle() {
 function Outside({ grass }: { grass: number }) {
   const scene = useGame((s) => s.scene);
   return (
-    <group visible={scene === 'outside'}>
+    <group visible={scene === "outside"}>
       <Terrain />
       <Mountains />
       <River />
@@ -52,6 +62,8 @@ function Outside({ grass }: { grass: number }) {
       <Herder />
       <Dog />
       <Eagle />
+      <Naadam />
+      <ArgalPatches />
       <Player />
     </group>
   );
@@ -65,11 +77,13 @@ export default function Game() {
     bindKeys();
     // debug handle for automated screenshots / tinkering in devtools
     const w = window as unknown as { __nv?: Record<string, unknown> };
-    w.__nv = { ...w.__nv, useGame, world, cam, icam, herd };
+    w.__nv = { ...w.__nv, useGame, world, cam, icam, herd, race, gatePoint };
     const nav = navigator as Navigator & { deviceMemory?: number };
-    const small = window.matchMedia('(pointer: coarse)').matches || (nav.deviceMemory ?? 8) <= 4;
+    const small =
+      window.matchMedia("(pointer: coarse)").matches ||
+      (nav.deviceMemory ?? 8) <= 4;
     const q = getQuality(); // chosen in the title screen's settings
-    setLowEnd(q === 'auto' ? small : q === 'low');
+    setLowEnd(q === "auto" ? small : q === "low");
   }, []);
 
   return (
@@ -77,26 +91,37 @@ export default function Game() {
       <Canvas
         shadows
         dpr={lowEnd ? [1, 1.25] : [1, 1.75]}
-        gl={{ antialias: true, powerPreference: 'high-performance' }}
+        gl={{ antialias: true, powerPreference: "high-performance" }}
         camera={{ fov: 50, near: 0.1, far: 2000, position: [-150, 70, 150] }}
         onCreated={({ gl }) => {
           gl.toneMapping = THREE.ACESFilmicToneMapping;
           gl.toneMappingExposure = 1.05;
         }}
       >
-        <fog attach="fog" args={['#e4c9a8', 90, 1000]} />
+        <fog attach="fog" args={["#e4c9a8", 90, 1000]} />
         <Suspense fallback={null}>
           <Sky />
           <Lights />
           <Outside grass={lowEnd ? 50000 : 150000} />
-          {scene === 'inside' && <Interior />}
+          {scene === "inside" && <Interior />}
           <Director />
           <DebugHandle />
         </Suspense>
         {!lowEnd && (
           <EffectComposer multisampling={4}>
-            <N8AO aoRadius={1.2} distanceFalloff={0.6} intensity={2.2} halfRes quality="performance" />
-            <Bloom intensity={0.45} luminanceThreshold={0.9} luminanceSmoothing={0.2} mipmapBlur />
+            <N8AO
+              aoRadius={1.2}
+              distanceFalloff={0.6}
+              intensity={2.2}
+              halfRes
+              quality="performance"
+            />
+            <Bloom
+              intensity={0.45}
+              luminanceThreshold={0.9}
+              luminanceSmoothing={0.2}
+              mipmapBlur
+            />
             <BrightnessContrast contrast={0.06} />
             <ToneMapping mode={ToneMappingMode.ACES_FILMIC} />
             <Vignette offset={0.28} darkness={0.55} />

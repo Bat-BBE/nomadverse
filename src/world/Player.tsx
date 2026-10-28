@@ -12,8 +12,10 @@ import { HorseModel, type HorseHandle } from './Animals';
 import { Human, type HumanHandle } from './Human';
 import { FELT_AREA, NPC_SPOTS } from './Npc';
 import { COWS, herd } from './Livestock';
-import { NPCS, type NpcId } from '@/game/content';
+import { NPCS, REQUESTS, type NpcId } from '@/game/content';
+import { ARGAL_SPOTS } from './Steppe';
 import { softDot } from './Ger';
+import { gatePoint, race, START as RACE_START, startRace } from '@/game/race';
 
 // ---------------------------------------------------------------- camera rig
 
@@ -109,14 +111,14 @@ function useInteractables(): Interactable[] {
         id: `npc.${id}`,
         r: 2.4,
         pos: () => NPC_SPOTS[id],
-        label: () => `${NPCS[id].name}тай ярилцах`,
+        label: () => `${withSuffix(NPCS[id].name)} ярилцах`,
         use: () => g().setModal({ type: 'npc', id }),
       })),
       {
         id: 'bucket',
         r: 1.6,
         pos: () => ({ x: 4.1, z: 3.6 }),
-        label: () => ((g().inventory.bucket ?? 0) > 0 || (g().inventory.milk ?? 0) > 0 ? null : 'Хувин авах'),
+        label: () => ((g().inventory.bucket ?? 0) > 0 ? null : 'Хувин авах'),
         use: () => {
           g().addItems({ bucket: 1 });
           g().toast('Хувин авлаа', 'Үнээ саахад хэрэгтэй');
@@ -128,8 +130,13 @@ function useInteractables(): Interactable[] {
         id: `cow.${i}`,
         r: 2.6,
         pos: () => c,
-        label: () => 'Үнээ саах',
+        label: () => (g().milked.includes(i) ? 'Энэ үнээ өнөөдөр саагдсан' : 'Үнээ саах'),
         use: () => {
+          if (g().milked.includes(i)) {
+            g().toast('Өнөөдөр саагдсан үнээ', 'Тугалынх нь хувийг үлдээсэн. Өөр үнээ саа, эсвэл маргааш ир.');
+            return;
+          }
+          world.milkCow = i;
           // sit at the cow's right side, by the udder, facing it
           const sx = c.x - Math.sin(c.heading) * 0.36 - Math.cos(c.heading) * 0.72;
           const sz = c.z - Math.cos(c.heading) * 0.36 + Math.sin(c.heading) * 0.72;
@@ -160,6 +167,29 @@ function useInteractables(): Interactable[] {
           g().startActivity('felting');
         },
       },
+      {
+        id: 'race',
+        r: 7,
+        pos: () => RACE_START,
+        label: () => {
+          if (race.state === 'count' || race.state === 'run') return null;
+          return g().mounted ? 'Наадмын уралдаанд оролцох' : 'Наадмын уралдаан — морь унаж ирээрэй';
+        },
+        use: () => {
+          if (!g().mounted) {
+            g().toast('Морь хэрэгтэй', 'Уяан дээрх морио унаад гарааны шугам дээр ир');
+            return;
+          }
+          startRace();
+        },
+      },
+      ...ARGAL_SPOTS.map((a, i) => ({
+        id: `argal.${i}`,
+        r: 1.9,
+        pos: () => a,
+        label: () => (g().argalTaken.includes(i) || g().mounted ? null : 'Аргал түүх'),
+        use: () => g().pickArgal(i),
+      })),
       { id: 'dog', r: 2.4, pos: () => world.dog, label: () => 'Банхар нохой', use: () => g().setModal({ type: 'info', id: 'dog' }) },
       {
         id: 'gate',
@@ -182,11 +212,25 @@ function useInteractables(): Interactable[] {
         id: 'river',
         r: 12,
         pos: () => ({ x: world.player.x, z: world.player.z + (riverDistance(world.player.x, world.player.z) < 12 ? 0 : 999) }),
-        label: () => 'Голын тухай',
-        use: () => g().setModal({ type: 'info', id: 'river' }),
+        label: () => (g().mounted ? 'Голын тухай' : 'Голоос ус авах'),
+        use: () => {
+          if (g().mounted) g().setModal({ type: 'info', id: 'river' });
+          else {
+            g().fetchWater();
+            if (!g().steps['info.river']) g().learn('river');
+          }
+        },
       },
     ];
   }, []);
+}
+
+/** Comitative case with vowel harmony: Батбаяртай, Цэцэгтэй, Дорж өвөөтэй. */
+function withSuffix(name: string) {
+  const word = name.split(' ').pop() ?? name;
+  const back = /[ауяы]/.test(word);
+  const o = !back && /[оё]/.test(word);
+  return `${name}${back ? 'тай' : o ? 'той' : 'тэй'}`;
 }
 
 let shearTarget: (typeof herd)[number] | null = null;
@@ -200,6 +244,73 @@ useGame.subscribe((st, prev) => {
 // ---------------------------------------------------------------- objective marker
 
 export function objectiveTarget(): { x: number; z: number } | null {
+  if (race.state === 'run' || race.state === 'count') return gatePoint(race.gate + 1);
+  return questTarget() ?? choreTarget() ?? requestTarget();
+}
+
+function looseSheep() {
+  const loose = herd.filter((m) => !m.resident && !m.penned);
+  if (!loose.length) return PEN_GATE;
+  return { x: loose.reduce((a, m) => a + m.x, 0) / loose.length, z: loose.reduce((a, m) => a + m.z, 0) / loose.length };
+}
+
+/** Where the first unfinished chore of the day happens. */
+function choreTarget(): { x: number; z: number } | null {
+  const s = useGame.getState();
+  const c = s.chores.find((x) => !x.done);
+  if (!c) return null;
+  switch (c.id) {
+    case 'milking':
+      return (s.inventory.bucket ?? 0) > 0 ? COWS[0] : { x: 4.1, z: 3.6 };
+    case 'tarag':
+      return (s.inventory.milk ?? 0) > 0 ? LOC.door : COWS[0];
+    case 'aaruul':
+      return (s.inventory.tarag ?? 0) > 0 ? LOC.door : (s.inventory.milk ?? 0) > 0 ? LOC.door : COWS[0];
+    case 'tea':
+      return LOC.door;
+    case 'herd':
+      return s.penned >= 5 ? PEN_GATE : looseSheep();
+    case 'shearing':
+      return PEN_GATE;
+    case 'ovoo':
+      return LOC.ovoo;
+    case 'race':
+      return s.mounted ? RACE_START : world.horse;
+    case 'argal':
+      return nearestArgal();
+    case 'wisdom':
+      return NPC_SPOTS.dorj;
+  }
+  return null;
+}
+
+function nearestArgal() {
+  const s = useGame.getState();
+  let best: { x: number; z: number } | null = null;
+  let bd = Infinity;
+  ARGAL_SPOTS.forEach((a, i) => {
+    if (s.argalTaken.includes(i)) return;
+    const d = Math.hypot(a.x - world.player.x, a.z - world.player.z);
+    if (d < bd) {
+      bd = d;
+      best = a;
+    }
+  });
+  return best;
+}
+
+/** Today's request: go and fetch what is missing, then take it to the neighbour. */
+function requestTarget(): { x: number; z: number } | null {
+  const s = useGame.getState();
+  const def = REQUESTS.find((r) => r.id === s.request?.id);
+  if (!def || s.request?.done) return null;
+  if (s.hasItems(def.needs)) return NPC_SPOTS[def.npc];
+  if ((s.inventory.argal ?? 0) < (def.needs.argal ?? 0)) return nearestArgal();
+  if ((s.inventory.water ?? 0) < (def.needs.water ?? 0)) return { x: 6, z: 30 };
+  return null;
+}
+
+function questTarget(): { x: number; z: number } | null {
   const s = useGame.getState();
   const q = activeQuest(s.questsDone);
   if (!q) return null;
@@ -231,12 +342,9 @@ export function objectiveTarget(): { x: number; z: number } | null {
     case 'herd.gate':
     case 'herd.close':
       return PEN_GATE;
-    case 'herd.drive': {
+    case 'herd.drive':
       // the loose sheep that still need driving
-      const loose = herd.filter((m) => !m.resident && !m.penned);
-      if (!loose.length) return PEN_GATE;
-      return { x: loose.reduce((a, m) => a + m.x, 0) / loose.length, z: loose.reduce((a, m) => a + m.z, 0) / loose.length };
-    }
+      return looseSheep();
     case 'milk.talk':
       return NPC_SPOTS.tsetseg;
     case 'milk.bucket':
@@ -430,7 +538,7 @@ export function Player() {
           current.current.use();
           return;
         }
-        if (s.mounted && Math.abs(world.horse.speed) < 3) {
+        if (s.mounted && Math.abs(world.horse.speed) < 3 && race.state !== 'count') {
           s.setMounted(false);
           // step off on the horse's left side
           const h = world.horse.heading;
@@ -450,7 +558,7 @@ export function Player() {
     const hs = world.horse;
     const playing = s.phase === 'play' && s.scene === 'outside';
     const cut = playing ? world.cutscene : null;
-    const frozen = !playing || !!s.modal || s.fading || !!cut || !!s.activity;
+    const frozen = !playing || !!s.modal || s.fading || !!cut || !!s.activity || race.state === 'count' || world.stoop > 0;
 
     // ---- input
     let fwd = 0;
@@ -572,8 +680,9 @@ export function Player() {
       }
     }
     if (world.cheer > 0 && !s.modal) world.cheer -= dt;
+    if (world.stoop > 0) world.stoop -= dt;
     if (nomad.current) {
-      nomad.current.anim.pose = s.mounted ? 'stand' : inActivity ? world.pose : world.cheer > 0 && !s.modal ? 'cheer' : 'stand';
+      nomad.current.anim.pose = s.mounted ? 'stand' : inActivity ? world.pose : world.stoop > 0 ? 'work' : world.cheer > 0 && !s.modal ? 'cheer' : 'stand';
       nomad.current.anim.speed = p.speed;
       nomad.current.anim.riding = s.mounted;
       nomad.current.anim.gallop = s.mounted ? Math.min(1, Math.max(0, (p.speed - 6) / 6)) : 0;
@@ -594,6 +703,13 @@ export function Player() {
     if (!playing) return;
 
     // ---- camera follow
+    // lined up at the start: look down the course over the horse's head
+    if (race.state === 'count') {
+      let d = hs.heading + Math.PI - cam.yaw;
+      d = Math.atan2(Math.sin(d), Math.cos(d));
+      cam.yaw += d * Math.min(1, dt * 3);
+      cam.pitch += (0.18 - cam.pitch) * Math.min(1, dt * 3);
+    }
     const idle = performance.now() - world.lastDrag > 1500;
     if (idle && p.speed > 1 && (s.mounted || fwd > 0)) {
       let d = p.heading + Math.PI - cam.yaw;
@@ -642,7 +758,8 @@ export function Player() {
     if (od < 14) s.complete('ride', 'hill');
 
     // walking around the ovoo clockwise (нар зөв) when seen from above
-    if (od > 1.8 && od < 13 && !s.steps['ovoo.circle']) {
+    const ovooChore = s.chores.some((c) => c.id === 'ovoo' && !c.done);
+    if (od > 1.8 && od < 13 && (!s.steps['ovoo.circle'] || ovooChore)) {
       const ang = Math.atan2(p.z - LOC.ovoo.z, p.x - LOC.ovoo.x);
       if (lastAngle.current !== null) {
         let d = ang - lastAngle.current;
@@ -655,7 +772,13 @@ export function Player() {
         }
         const laps = Math.max(0, Math.floor(circle.current / (Math.PI * 2)));
         if (laps !== s.circle) s.setCircle(laps);
-        if (laps >= 3) s.complete('ovoo', 'circle');
+        if (laps >= 3) {
+          s.complete('ovoo', 'circle');
+          if (ovooChore) s.chore('ovoo');
+          // start counting afresh for the next time
+          circle.current = 0;
+          s.setCircle(0);
+        }
       }
       lastAngle.current = ang;
     } else lastAngle.current = null;
@@ -676,7 +799,7 @@ export function Player() {
     }
     current.current = best;
     if (best) s.setPrompt(best.label());
-    else if (s.mounted && Math.abs(hs.speed) < 3) s.setPrompt('Мориноос буух');
+    else if (s.mounted && Math.abs(hs.speed) < 3 && race.state !== 'count' && race.state !== 'run') s.setPrompt('Мориноос буух');
     else s.setPrompt(null);
   });
 

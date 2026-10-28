@@ -5,6 +5,7 @@ import * as THREE from 'three';
 import { fbm, heightAt, LOC, riverDistance, riverZ, WATER_Y, WORLD_SIZE } from '@/game/terrain';
 import { world } from '@/game/store';
 import { addStatic } from '@/game/colliders';
+import { courseDistance, GATE_HALF } from '@/game/race';
 import { env } from '@/game/tod';
 import { cloudPuff } from './Ger';
 import { stoneTexture } from '@/game/textures';
@@ -441,6 +442,7 @@ export function Scatter() {
         const x = ox + Math.cos(a) * r;
         const z = oz + Math.sin(a) * r;
         if (Math.hypot(x - LOC.ovoo.x, z - LOC.ovoo.z) < 9) continue;
+        if (courseDistance(x, z) < GATE_HALF + 4) continue; // keep the race track clear
         const s = (0.5 + rnd() * 1.6) * size * (1 - r / (6 * size));
         e.set(rnd() * 0.4, rnd() * 3, rnd() * 0.4);
         q.setFromEuler(e);
@@ -455,7 +457,7 @@ export function Scatter() {
       const r = 18 + rnd() * 140;
       const x = Math.cos(a) * r;
       const z = Math.sin(a) * r;
-      if (riverDistance(x, z) < 7) continue;
+      if (riverDistance(x, z) < 7 || courseDistance(x, z) < GATE_HALF + 2) continue;
       const s = 0.15 + rnd() * 0.3;
       e.set(rnd(), rnd() * 3, rnd());
       q.setFromEuler(e);

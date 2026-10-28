@@ -72,24 +72,46 @@ export const PRESETS: Preset[] = [
     glow: 1.6,
     dayness: 0.25,
   },
+  {
+    // Landing screen: bright clear morning with the sun behind the camera, so
+    // the valley and the ger are lit from the front instead of backlit
+    skyTop: '#3a76cc',
+    skyHorizon: '#f4dcbc',
+    skySun: '#ffe2b0',
+    ground: '#c8b08c',
+    sun: '#fff0d8',
+    sunIntensity: 3.5,
+    sunDir: [-0.72, 0.5, 0.48],
+    hemiSky: '#cfe0f7',
+    hemiGround: '#8a7a52',
+    hemiIntensity: 1.45,
+    fog: '#e8dcc6',
+    stars: 0,
+    glow: 0.7,
+    dayness: 1,
+  },
 ];
+
+/** Index of the landing-screen lighting preset (not one of the T-key times of day). */
+export const TITLE_PRESET = 3;
 
 export const TOD_LABELS = ['Үүр цайх', 'Өдөр', 'Нар жаргах'];
 
 const c = (s: string) => new THREE.Color(s);
+const P0 = PRESETS[TITLE_PRESET]; // the game opens on the landing screen
 
 export const env = {
-  skyTop: c(PRESETS[0].skyTop),
-  skyHorizon: c(PRESETS[0].skyHorizon),
-  skySun: c(PRESETS[0].skySun),
-  ground: c(PRESETS[0].ground),
-  sun: c(PRESETS[0].sun),
-  sunIntensity: PRESETS[0].sunIntensity,
-  sunDir: new THREE.Vector3(...PRESETS[0].sunDir).normalize(),
-  hemiSky: c(PRESETS[0].hemiSky),
-  hemiGround: c(PRESETS[0].hemiGround),
-  hemiIntensity: PRESETS[0].hemiIntensity,
-  fog: c(PRESETS[0].fog),
+  skyTop: c(P0.skyTop),
+  skyHorizon: c(P0.skyHorizon),
+  skySun: c(P0.skySun),
+  ground: c(P0.ground),
+  sun: c(P0.sun),
+  sunIntensity: P0.sunIntensity,
+  sunDir: new THREE.Vector3(...P0.sunDir).normalize(),
+  hemiSky: c(P0.hemiSky),
+  hemiGround: c(P0.hemiGround),
+  hemiIntensity: P0.hemiIntensity,
+  fog: c(P0.fog),
   stars: 0,
   glow: 1,
   dayness: 1,

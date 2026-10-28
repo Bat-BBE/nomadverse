@@ -1,5 +1,22 @@
 import { create } from 'zustand';
-import { INFO, ITEMS, NPCS, QUESTS, questOrder, type NpcId, type QuestId, type StartPref } from './content';
+import {
+  CHORES,
+  CHORES_PER_DAY,
+  DAILY_GIFTS,
+  INFO,
+  ITEM_SOURCE,
+  ITEMS,
+  NPCS,
+  QUESTS,
+  questOrder,
+  REQUESTS,
+  START_ITEMS,
+  honorTitle,
+  type ChoreId,
+  type NpcId,
+  type QuestId,
+  type StartPref,
+} from './content';
 import { ACTIVITIES } from './activities';
 import { audio } from './audio';
 
@@ -18,7 +35,36 @@ export type Modal =
   | { type: 'activity' }
   | { type: 'inventory' }
   | { type: 'journal' }
-  | { type: 'menu' };
+  | { type: 'menu' }
+  | { type: 'race' };
+
+export interface Chore {
+  id: ChoreId;
+  done: boolean;
+}
+export interface Mastery {
+  best: number; // best star rating 1..3
+  times: number;
+}
+export interface Records {
+  races: number;
+  wins: number;
+  best: number | null; // best race time, seconds
+}
+export interface DayRequest {
+  id: string;
+  done: boolean;
+}
+
+/** What the tea needs on the fire: water in the pot, аргал under it, milk to add. */
+export const TEA_NEEDS: Record<string, number> = { water: 1, argal: 1, milk: 1 };
+
+export interface RaceResult {
+  place: number;
+  time: number;
+  best: boolean; // a new best time
+  xp: number;
+}
 
 export interface Profile {
   name: string;
@@ -85,6 +131,20 @@ interface GameState {
   activitiesDone: string[];
   penned: number; // loose sheep driven into the pen
   hasSave: boolean;
+  day: number;
+  chores: Chore[];
+  mastery: Record<string, Mastery>;
+  /** mistakes in the running activity (for its star rating) */
+  misses: number;
+  records: Records;
+  raceResult: RaceResult | null;
+  racing: boolean;
+  streak: number; // calendar days played in a row
+  lastDate: string;
+  honor: number; // нэр хүнд earned by helping the neighbours
+  request: DayRequest | null; // today's request from a neighbour
+  milked: number[]; // cows already milked today
+  argalTaken: number[]; // аргал patches gathered today
 
   setPhase: (p: Phase) => void;
   setPrompt: (p: string | null) => void;
@@ -114,6 +174,16 @@ interface GameState {
   activityNext: () => void;
   cancelActivity: () => void;
   setPenned: (n: number) => void;
+  miss: () => void;
+  chore: (id: ChoreId) => void;
+  refreshChores: () => void;
+  sleep: () => void;
+  setRacing: (on: boolean) => void;
+  finishRace: (place: number, time: number) => void;
+  fulfillRequest: () => void;
+  pickArgal: (i: number) => void;
+  fetchWater: () => void;
+  teaServed: () => void;
 }
 
 let toastId = 0;
@@ -138,6 +208,16 @@ interface SaveData {
   tod: Tod;
   pos: { x: number; z: number; heading: number };
   savedAt: number;
+  day: number;
+  chores: Chore[];
+  mastery: Record<string, Mastery>;
+  records: Records;
+  streak: number;
+  lastDate: string;
+  honor: number;
+  request: DayRequest | null;
+  milked: number[];
+  argalTaken: number[];
 }
 
 const QUEST_IDS = new Set(QUESTS.map((q) => q.id));
@@ -171,6 +251,23 @@ function readSave(): SaveData | null {
       tod: ([0, 1, 2].includes(num(d.tod)) ? num(d.tod) : 0) as Tod,
       pos: { x: num(d.pos?.x, 1.5), z: num(d.pos?.z, 7.5), heading: num(d.pos?.heading, 2) },
       savedAt: num(d.savedAt),
+      // added with daily life; older saves start on day 1
+      day: Math.max(1, Math.floor(num(d.day, 1))),
+      chores: Array.isArray(d.chores) ? d.chores.filter((c) => c && CHORES[c.id as ChoreId]).map((c) => ({ id: c.id, done: !!c.done })) : [],
+      mastery: Object.fromEntries(
+        Object.entries(obj(d.mastery, {} as Record<string, Mastery>)).map(([k, m]) => [k, { best: Math.min(3, num(m?.best)), times: num(m?.times) }])
+      ),
+      records: {
+        races: num(d.records?.races),
+        wins: num(d.records?.wins),
+        best: typeof d.records?.best === 'number' && d.records.best > 0 ? d.records.best : null,
+      },
+      streak: Math.max(1, num(d.streak, 1)),
+      lastDate: typeof d.lastDate === 'string' ? d.lastDate : '',
+      honor: num(d.honor),
+      request: d.request && REQUESTS.some((r) => r.id === d.request?.id) ? { id: d.request.id, done: !!d.request.done } : null,
+      milked: Array.isArray(d.milked) ? d.milked.filter((n) => typeof n === 'number') : [],
+      argalTaken: Array.isArray(d.argalTaken) ? d.argalTaken.filter((n) => typeof n === 'number') : [],
     };
   } catch {
     return null;
@@ -185,7 +282,34 @@ export function hasSaveData() {
 export function saveSummary() {
   const d = readSave();
   if (!d) return null;
-  return { name: d.profile.name, woman: d.profile.woman, xp: d.xp, quests: d.questsDone.length, savedAt: d.savedAt };
+  return { name: d.profile.name, woman: d.profile.woman, xp: d.xp, quests: d.questsDone.length, savedAt: d.savedAt, day: d.day, streak: d.streak };
+}
+
+/** Local calendar date, e.g. 2026-10-28 (for the daily return gift). */
+function today(offset = 0) {
+  const d = new Date(Date.now() + offset * 86400000);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+/** Pick the day's chores from what the player has learned (varies by day). */
+function pickChores(day: number, questsDone: QuestId[], activitiesDone: string[], keep: Chore[] = []): Chore[] {
+  const open = (Object.keys(CHORES) as ChoreId[]).filter(
+    (id) => CHORES[id].unlocked({ questsDone, activitiesDone }) && !keep.some((c) => c.id === id)
+  );
+  // deterministic shuffle by day so a reload doesn't reroll
+  const rnd = (i: number) => {
+    const k = Math.sin((day + 1) * 12.9898 + i * 78.233) * 43758.5453;
+    return k - Math.floor(k);
+  };
+  const order = open.map((id, i) => ({ id, k: rnd(i) })).sort((a, b) => a.k - b.k);
+  return [...keep, ...order.map((o) => ({ id: o.id, done: false }))].slice(0, CHORES_PER_DAY);
+}
+
+/** A neighbour's request for the day, from the crafts the player already knows. */
+function pickRequest(day: number, questsDone: QuestId[], activitiesDone: string[]): DayRequest | null {
+  const open = REQUESTS.filter((r) => r.unlocked({ questsDone, activitiesDone }));
+  if (!open.length) return null;
+  return { id: open[(day * 7 + 3) % open.length].id, done: false };
 }
 
 const QUALITY_KEY = 'nomadverse.quality';
@@ -234,6 +358,19 @@ export const useGame = create<GameState>((set, get) => ({
   activitiesDone: [],
   penned: 0,
   hasSave: false,
+  day: 1,
+  chores: [],
+  mastery: {},
+  misses: 0,
+  records: { races: 0, wins: 0, best: null },
+  raceResult: null,
+  racing: false,
+  streak: 1,
+  lastDate: '',
+  honor: 0,
+  request: null,
+  milked: [],
+  argalTaken: [],
 
   setPhase: (phase) => set({ phase }),
   setPrompt: (prompt) => {
@@ -276,6 +413,7 @@ export const useGame = create<GameState>((set, get) => ({
     const finished = def.steps.every((x) => steps[`${quest}.${x.id}`]);
     if (finished) {
       set({ steps, xp: s.xp + def.xp, questsDone: [...s.questsDone, quest] });
+      get().refreshChores();
       audio.success();
       world.cheer = 2.2;
       get().toast(`${def.title} — дууслаа`, `+${def.xp} туршлагын оноо`);
@@ -311,13 +449,23 @@ export const useGame = create<GameState>((set, get) => ({
       xp: 0,
       steps: {},
       questsDone: [],
-      inventory: {},
+      inventory: { ...START_ITEMS },
       activitiesDone: [],
       circle: 0,
       penned: 0,
       gateOpen: false,
       tea: freshTea(),
       tod: 0,
+      honor: 0,
+      request: null,
+      milked: [],
+      argalTaken: [],
+      day: 1,
+      chores: [],
+      mastery: {},
+      records: { races: 0, wins: 0, best: null },
+      streak: 1,
+      lastDate: today(),
       phase: 'entering',
     });
     world.intro = true;
@@ -346,9 +494,36 @@ export const useGame = create<GameState>((set, get) => ({
       penned: d.penned,
       gateOpen: d.gateOpen,
       tod: d.tod,
+      day: d.day,
+      chores: d.chores,
+      mastery: d.mastery,
+      records: d.records,
+      streak: d.streak,
+      lastDate: d.lastDate,
+      honor: d.honor,
+      request: d.request,
+      milked: d.milked,
+      argalTaken: d.argalTaken,
       phase: 'entering',
     });
     world.intro = false;
+    // coming back on a new calendar day: a small gift, more for a streak
+    const now = today();
+    if (d.lastDate !== now) {
+      const streak = d.lastDate === today(-1) ? d.streak + 1 : 1;
+      const gift = DAILY_GIFTS[(streak - 1) % DAILY_GIFTS.length];
+      const bonus = 10 * Math.min(streak, 7);
+      set({ streak, lastDate: now, xp: get().xp + bonus });
+      get().addItems(gift);
+      const names = Object.entries(gift)
+        .map(([k, n]) => `${ITEMS[k]?.name ?? k}${n > 1 ? ` ×${n}` : ''}`)
+        .join(', ');
+      setTimeout(
+        () => get().toast(streak > 1 ? `${streak} өдөр дараалан ирлээ!` : 'Эргэн ирсэнд баяртай байна', `Өдрийн бэлэг: ${names} · +${bonus} XP`),
+        3200
+      );
+    }
+    get().refreshChores();
     world.player.x = d.pos.x;
     world.player.z = d.pos.z;
     world.player.heading = d.pos.heading;
@@ -374,6 +549,16 @@ export const useGame = create<GameState>((set, get) => ({
       tod: s.tod,
       pos: { x: world.player.x, z: world.player.z, heading: world.player.heading },
       savedAt: Date.now(),
+      day: s.day,
+      chores: s.chores,
+      mastery: s.mastery,
+      records: s.records,
+      streak: s.streak,
+      lastDate: s.lastDate,
+      honor: s.honor,
+      request: s.request,
+      milked: s.milked,
+      argalTaken: s.argalTaken,
     };
     try {
       localStorage.setItem(SAVE_KEY, JSON.stringify(data));
@@ -414,14 +599,15 @@ export const useGame = create<GameState>((set, get) => ({
     if (!s.hasItems(def.requires)) {
       const missing = Object.entries(def.requires)
         .filter(([k, n]) => (s.inventory[k] ?? 0) < n)
-        .map(([k, n]) => `${ITEMS[k]?.name ?? k}${n > 1 ? ` ×${n}` : ''}`)
+        .map(([k, n]) => `${ITEMS[k]?.name ?? k}${n > 1 ? ` ×${n}` : ''}${ITEM_SOURCE[k] ? ` (${ITEM_SOURCE[k]})` : ''}`)
         .join(', ');
       s.toast(`${def.title}: дутуу зүйл байна`, `Хэрэгтэй: ${missing}`);
       audio.click();
       return;
     }
+    if (def.pick) def.steps = def.pick(s.day); // today's riddles
     world.pose = def.pose;
-    set({ activity: { id, step: 0 }, modal: { type: 'activity' } });
+    set({ activity: { id, step: 0 }, modal: { type: 'activity' }, misses: 0 });
   },
   activityNext: () => {
     const s = get();
@@ -434,22 +620,36 @@ export const useGame = create<GameState>((set, get) => ({
       set({ activity: { id: a.id, step: a.step + 1 } });
       return;
     }
-    // finished: swap items, reward, unlock knowledge, advance the quest
+    // finished: rate it, swap items, reward, unlock knowledge, advance the quest
+    const stars = starsFor(s.misses);
+    const gives = { ...def.gives };
+    for (const [k, n] of Object.entries(bonusFor(def.id, stars))) gives[k] = (gives[k] ?? 0) + n;
+    const xp = activityXp(def.xp, stars);
+    const prev = s.mastery[def.id] ?? { best: 0, times: 0 };
     s.addItems(Object.fromEntries(Object.entries(def.consumes).map(([k, n]) => [k, -n])));
-    s.addItems(def.gives);
+    s.addItems(gives);
     set({
       activity: { id: a.id, step: def.steps.length },
       activitiesDone: s.activitiesDone.includes(def.id) ? s.activitiesDone : [...s.activitiesDone, def.id],
-      xp: get().xp + def.xp,
+      xp: get().xp + xp,
+      mastery: { ...s.mastery, [def.id]: { best: Math.max(prev.best, stars), times: prev.times + 1 } },
     });
     world.pose = 'cheer';
     world.cheer = 2;
-    const gained = Object.entries(def.gives)
+    const gained = Object.entries(gives)
       .map(([k, n]) => `${ITEMS[k]?.name ?? k}${n > 1 ? ` ×${n}` : ''}`)
       .join(', ');
-    get().toast(`${def.title} — амжилттай`, `+${def.xp} · Олсон: ${gained}`);
+    get().toast(`${def.title} — ${'★'.repeat(stars)}${'☆'.repeat(3 - stars)}`, gained ? `+${xp} · Олсон: ${gained}` : `+${xp} туршлага`);
     for (const k of def.knowledge) get().learn(k);
     if (def.quest) get().complete(def.quest[0], def.quest[1]);
+    get().refreshChores();
+    // riddles are once a day
+    if (def.pick) set({ steps: { ...get().steps, [`${def.id}.${get().day}`]: true } });
+    if (def.id in CHORES) get().chore(def.id as ChoreId);
+    if (def.id === 'milking' && world.milkCow !== null) {
+      if (!get().milked.includes(world.milkCow)) set({ milked: [...get().milked, world.milkCow] });
+      world.milkCow = null;
+    }
     audio.success();
     get().saveNow(true);
   },
@@ -460,7 +660,147 @@ export const useGame = create<GameState>((set, get) => ({
   setPenned: (penned) => {
     if (penned !== get().penned) set({ penned });
   },
+  miss: () => set({ misses: get().misses + 1 }),
+
+  // ---- daily life
+  chore: (id) => {
+    get().refreshChores();
+    const s = get();
+    const c = s.chores.find((x) => x.id === id);
+    if (!c || c.done) return;
+    const chores = s.chores.map((x) => (x.id === id ? { ...x, done: true } : x));
+    const left = chores.filter((x) => !x.done).length;
+    set({ chores, xp: s.xp + 20 });
+    // the sun moves with the day's work: noon after the first chore, dusk when all are done
+    if (left === 0 && chores.length >= 2) {
+      set({ tod: 2 });
+      setTimeout(() => get().toast('Өнөөдрийн ажил дууслаа!', 'Нар жаргаж байна. Гэртээ орж орон дээрээ амраад шинэ өдрийг угтаарай.'), 1400);
+    } else if (s.tod === 0 && left < chores.length - (chores.length >= 2 ? 0 : 1)) set({ tod: 1 });
+    get().toast(`Өдрийн ажил: ${CHORES[id].title}`, `+20 · ${left ? `${left} ажил үлдлээ` : 'бүгд биеллээ'}`);
+  },
+  refreshChores: () => {
+    // add newly learned work to a day that still has room for it
+    const s = get();
+    if (!s.request) {
+      const request = pickRequest(s.day, s.questsDone, s.activitiesDone);
+      if (request) set({ request });
+    }
+    if (s.chores.length >= CHORES_PER_DAY) return;
+    const chores = pickChores(s.day, s.questsDone, s.activitiesDone, s.chores);
+    if (chores.length !== s.chores.length) set({ chores });
+  },
+  sleep: () => {
+    if (get().fading) return;
+    set({ fading: true, prompt: null });
+    setTimeout(() => {
+      const st = get();
+      const day = st.day + 1;
+      set({
+        day,
+        tod: 0,
+        chores: pickChores(day, st.questsDone, st.activitiesDone),
+        request: pickRequest(day, st.questsDone, st.activitiesDone),
+        milked: [],
+        argalTaken: [],
+        penned: 0,
+        gateOpen: false,
+        circle: 0,
+        tea: freshTea(),
+      });
+      setTimeout(() => set({ fading: false }), 300);
+      get().toast(`${day}-р өдөр`, 'Үүр цайж, шинэ өдөр эхэллээ. Өнөөдрийн ажлаа хараарай.');
+      get().saveNow(true);
+    }, 1400);
+  },
+  setRacing: (racing) => set({ racing }),
+
+  // ---- the neighbours and the steppe's gifts
+  fulfillRequest: () => {
+    const s = get();
+    const def = REQUESTS.find((r) => r.id === s.request?.id);
+    if (!def || s.request?.done || !s.hasItems(def.needs)) return;
+    const before = honorTitle(s.honor).label;
+    s.addItems(Object.fromEntries(Object.entries(def.needs).map(([k, n]) => [k, -n])));
+    s.addItems(def.gives);
+    const honor = s.honor + def.honor;
+    set({ request: { id: def.id, done: true }, honor, xp: get().xp + def.honor * 2 });
+    audio.success();
+    world.cheer = 2;
+    const gained = Object.entries(def.gives)
+      .map(([k, n]) => `${ITEMS[k]?.name ?? k}${n > 1 ? ` ×${n}` : ''}`)
+      .join(', ');
+    get().toast(`${NPCS[def.npc].name}: ачтай, ачтай!`, `+${def.honor} нэр хүнд · ${gained}`);
+    const after = honorTitle(honor).label;
+    if (after !== before) setTimeout(() => get().toast(`Шинэ нэр хүнд: ${after}`, 'Хотныхон чамайг улам хүндэлж байна'), 1800);
+    get().saveNow(true);
+  },
+  pickArgal: (i) => {
+    const s = get();
+    if (s.argalTaken.includes(i)) return;
+    const argalTaken = [...s.argalTaken, i];
+    set({ argalTaken });
+    s.addItems({ argal: 1 });
+    audio.click();
+    world.stoop = 0.9; // bend down to pick it up
+    s.toast('Аргал түүлээ', `Өнөөдөр ${argalTaken.length} · Хатсан аргал утаа багатай, гал сайтай`);
+    if (!s.steps['info.argal']) get().learn('argal');
+    if (argalTaken.length >= 3) get().chore('argal');
+  },
+  fetchWater: () => {
+    const s = get();
+    s.addItems({ water: 2 });
+    world.stoop = 0.9;
+    audio.pour();
+    s.toast('Голоос ус авлаа', 'Ус ×2 · Усыг бохирдуулалгүй, зөөлөн утгаж авдаг');
+    if (!s.steps['info.water']) get().learn('water');
+  },
+  teaServed: () => {
+    const s = get();
+    // the pot used the household's water, аргал and milk; the tea is kept for guests
+    s.addItems(Object.fromEntries(Object.entries(TEA_NEEDS).map(([k, n]) => [k, -Math.min(n, s.inventory[k] ?? 0)])));
+    s.addItems({ tea: 1 });
+    s.complete('tea', 'serve');
+    s.chore('tea');
+  },
+  finishRace: (place, time) => {
+    const s = get();
+    const r = s.records;
+    const best = r.best === null || time < r.best;
+    const xp = [120, 70, 50, 35][place - 1] ?? 35;
+    set({
+      records: { races: r.races + 1, wins: r.wins + (place === 1 ? 1 : 0), best: best ? time : r.best },
+      xp: s.xp + xp,
+      raceResult: { place, time, best, xp },
+      racing: false,
+    });
+    if (place === 1) get().addItems({ medal: 1 });
+    get().learn('naadam');
+    get().learn('uraldaan');
+    get().chore('race');
+    audio.success();
+    world.cheer = 2.5;
+    setTimeout(() => get().setModal({ type: 'race' }), 1300);
+    get().saveNow(true);
+  },
 }));
+
+/** Star rating from the mistakes made during an activity. */
+export function starsFor(misses: number) {
+  return misses === 0 ? 3 : misses <= 2 ? 2 : 1;
+}
+
+export function activityXp(base: number, stars: number) {
+  return base + (stars - 1) * 10;
+}
+
+/** Extra produce for flawless work (not for the big crafts). */
+export function bonusFor(id: string, stars: number): Record<string, number> {
+  if (stars < 3) return {};
+  if (id === 'milking') return { milk: 1 };
+  if (id === 'aaruul') return { aaruul: 2 };
+  if (id === 'shearing') return { wool: 1 };
+  return {};
+}
 
 export function isDone(steps: Record<string, boolean>, quest: QuestId, step: string) {
   return !!steps[`${quest}.${step}`];
@@ -491,6 +831,10 @@ export const world = {
   pose: 'stand' as import('@/world/Human').HumanPose,
   /** seconds left of the celebration pose after finishing something */
   cheer: 0,
+  /** seconds left of a short bend-down (picking something up) */
+  stoop: 0,
+  /** the cow being milked (each gives milk once a day) */
+  milkCow: null as number | null,
   /** where the current activity happens (player is placed and faced there) */
   activitySpot: null as null | { x: number; z: number; heading: number },
   /** a new journey just started: show the guide's welcome once the camera lands */
@@ -508,7 +852,7 @@ if (typeof window !== 'undefined') {
   let t: number | null = null;
   useGame.subscribe((s, prev) => {
     if (s.phase !== 'play') return;
-    if (s.inventory === prev.inventory && s.steps === prev.steps && s.gateOpen === prev.gateOpen && s.penned === prev.penned) return;
+    if (s.inventory === prev.inventory && s.steps === prev.steps && s.gateOpen === prev.gateOpen && s.penned === prev.penned && s.chores === prev.chores) return;
     if (t) clearTimeout(t);
     t = window.setTimeout(() => useGame.getState().saveNow(true), 2000);
   });

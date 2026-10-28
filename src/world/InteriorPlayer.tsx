@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import { useGame, world } from '@/game/store';
+import { missingForTea } from '@/ui/TeaPanel';
 import { keys, onPress } from '@/game/input';
 import { audio } from '@/game/audio';
 import { Human, type HumanHandle, type HumanPose } from './Human';
@@ -64,12 +65,37 @@ interface Spot {
   use: () => void;
 }
 
+/** Evening, or the day's work all done: lying down sleeps through to the next morning. */
+function canSleep() {
+  const s = useGame.getState();
+  return s.tod === 2 || (s.chores.length > 0 && s.chores.every((c) => c.done));
+}
+const bedLabel = () => (canSleep() ? 'Унтаж амрах — шинэ өдөр' : 'Орон дээр хэвтэх');
+
 function useSpots(start: (a: ActionType) => void): Spot[] {
   return useMemo(() => {
     const g = () => useGame.getState();
+    const lieDown = (a: ActionType) => {
+      start(a);
+      if (canSleep()) setTimeout(() => g().sleep(), 1600);
+    };
     return [
       { x: DOOR_IN.x, z: DOOR_IN.z, r: 1.0, label: () => 'Гадагш гарах', use: () => (world.cutscene = { type: 'leave', t: 0 }) },
-      { x: 0, z: 0.85, r: 0.9, label: () => 'Цай чанах', use: () => g().setModal({ type: 'tea' }) },
+      {
+        x: 0,
+        z: 0.85,
+        r: 0.9,
+        label: () => 'Цай чанах',
+        use: () => {
+          // a fresh pot needs water, аргал for the fire and milk
+          const missing = g().tea.step === 0 ? missingForTea() : [];
+          if (missing.length) {
+            g().toast('Цай чанах зүйл дутуу', `Хэрэгтэй: ${missing.join(', ')} · Аргалыг бэлчээрээс, усыг голоос, сүүг үнээнээс`);
+            return;
+          }
+          g().setModal({ type: 'tea' });
+        },
+      },
       {
         // цагаан идээний ширээ on the east (kitchen) side, by the cupboard
         x: 1.75,
@@ -87,8 +113,8 @@ function useSpots(start: (a: ActionType) => void): Spot[] {
       { x: 0.75, z: 0.55, r: 0.55, label: () => 'Гараа ээх', use: () => start('warm') },
       { x: 0, z: -2.0, r: 0.75, label: () => 'Хойморт суух', use: () => start('sit') },
       { x: 0, z: -2.45, r: 0.45, label: () => 'Авдар нээх', use: () => g().setModal({ type: 'chest' }) },
-      { x: 1.85, z: -0.4, r: 0.8, label: () => 'Орон дээр хэвтэх', use: () => start('lieE') },
-      { x: -1.85, z: -0.4, r: 0.8, label: () => 'Орон дээр хэвтэх', use: () => start('lieW') },
+      { x: 1.85, z: -0.4, r: 0.8, label: bedLabel, use: () => lieDown('lieE') },
+      { x: -1.85, z: -0.4, r: 0.8, label: bedLabel, use: () => lieDown('lieW') },
       { x: -1.9, z: -1.75, r: 0.6, label: () => 'Морин хуур тоглох', use: () => start('play') },
     ];
   }, [start]);

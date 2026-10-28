@@ -174,7 +174,7 @@ export function Title() {
 
   const items: { key: string; label: string; sub?: string; run: () => void; main?: boolean }[] = [];
   if (summary)
-    items.push({ key: 'cont', label: 'Үргэлжлүүлэх', sub: `${summary.name} · ${summary.xp} XP · ${summary.quests}/10 даалгавар`, run: cont, main: true });
+    items.push({ key: 'cont', label: 'Үргэлжлүүлэх', sub: `${summary.name} · ${summary.day}-р өдөр · ${summary.xp} XP · ${summary.quests}/10 даалгавар`, run: cont, main: true });
   items.push({
     key: 'new',
     label: confirm ? 'Дахин дарж батлах' : 'Шинэ аялал',
@@ -190,8 +190,8 @@ export function Title() {
         <motion.div className="title2" initial={{ opacity: 1 }} exit={{ opacity: 0, transition: { duration: 1 } }}>
           {/* opening: black fade, then film bars that relax */}
           <motion.div className="t-black" initial={{ opacity: 1 }} animate={{ opacity: 0 }} transition={{ duration: 1.6, ease: 'easeOut' }} />
-          <motion.div className="t-bar top" initial={{ height: '14vh' }} animate={{ height: '6vh' }} transition={{ delay: 0.6, duration: 2.2, ease }} />
-          <motion.div className="t-bar bottom" initial={{ height: '14vh' }} animate={{ height: '6vh' }} transition={{ delay: 0.6, duration: 2.2, ease }} />
+          <motion.div className="t-bar top" initial={{ height: '14vh' }} animate={{ height: '4.5vh' }} transition={{ delay: 0.6, duration: 2.2, ease }} />
+          <motion.div className="t-bar bottom" initial={{ height: '14vh' }} animate={{ height: '4.5vh' }} transition={{ delay: 0.6, duration: 2.2, ease }} />
           <div className="t-shade" />
           <div className="t-sun" />
           <Motes />

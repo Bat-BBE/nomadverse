@@ -1,6 +1,7 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
-import { useGame } from '@/game/store';
+import { TEA_NEEDS, useGame } from '@/game/store';
+import { ITEMS } from '@/game/content';
 import { audio } from '@/game/audio';
 
 // Сүүтэй цай: a short, state-driven mini game. The 3D pot on the stove mirrors
@@ -8,6 +9,23 @@ import { audio } from '@/game/audio';
 
 const STEP_TITLES = ['Тогоо сонгох', 'Ус хийх', 'Буцалгах', 'Цай хийх', 'Сүү, давс', 'Самрах', 'Аягалах', 'Бэлэн'];
 const ZONE: [number, number] = [0.6, 0.85];
+
+// Whom to pour for, in the order of respect: the elder in the хоймор first,
+// then the mother of the house, yourself last. Shown shuffled.
+const SERVE = [
+  { id: 'elder', label: 'Хойморт залсан өвөөд' },
+  { id: 'mother', label: 'Гэрийн эзэгтэй ээждээ' },
+  { id: 'self', label: 'Өөртөө' },
+];
+const SERVE_SHOWN = [SERVE[2], SERVE[0], SERVE[1]];
+
+/** Brewing again needs the household's water, аргал and milk. */
+export function missingForTea() {
+  const s = useGame.getState();
+  return Object.entries(TEA_NEEDS)
+    .filter(([k, n]) => (s.inventory[k] ?? 0) < n)
+    .map(([k]) => ITEMS[k].name);
+}
 
 function Choice({ options, onPick }: { options: { id: string; label: string; note: string; ok: boolean }[]; onPick: (id: string) => void }) {
   const [msg, setMsg] = useState<string | null>(null);
@@ -96,12 +114,12 @@ export function TeaPanel() {
       <div className="tea-body">
         {step === 0 && (
           <>
-            <p>Монгол айлд цайг ихэвчлэн зуухан дээрх том тогоонд чанадаг. Аль савыг сонгох вэ?</p>
+            <p>Өглөөний цай бол айлын амьдралын эхлэл. Гал голомтоо бадрааж, тогоогоо тулга дээр залъя. Аль савыг сонгох вэ?</p>
             <Choice
               options={[
                 { id: 'pot', label: 'Ширмэн тогоо', note: '', ok: true },
-                { id: 'cup', label: 'Шаазан аяга', note: 'Аягаар цай уудаг, харин чанахад бага.', ok: false },
-                { id: 'bucket', label: 'Хувин', note: 'Хувинаар ус зөөдөг — гал дээр тавьдаггүй.', ok: false },
+                { id: 'cup', label: 'Шаазан аяга', note: 'Аягаар цай уудаг, харин чанахад дэндүү бага.', ok: false },
+                { id: 'bucket', label: 'Модон хувин', note: 'Модон хувинаар ус зөөдөг. Гал дээр тавьвал шатна.', ok: false },
               ]}
               onPick={() => update({ step: 1 })}
             />
@@ -110,7 +128,7 @@ export function TeaPanel() {
 
         {step === 1 && (
           <>
-            <p>Товчийг дарж ус хийнэ. Шар бүсэд хүрмэгц тавь.</p>
+            <p>Голоос авчирсан усаа тогоондоо хийнэ. Товчийг дараад шар бүсэд хүрмэгц тавь. Хэт дүүргэвэл буцлахдаа халина.</p>
             <div className="meter">
               <div className="meter-zone" style={{ left: `${ZONE[0] * 100}%`, width: `${(ZONE[1] - ZONE[0]) * 100}%` }} />
               <div className="meter-fill water" style={{ width: `${tea.water * 100}%` }} />
@@ -129,7 +147,7 @@ export function TeaPanel() {
 
         {step === 2 && (
           <>
-            <p>Аргалын гал дээр ус буцалж байна…</p>
+            <p>Аргалын гал улайсаж, ус шуугин буцалж байна…</p>
             <div className="meter">
               <div className="meter-fill boil" style={{ width: `${tea.boil * 100}%` }} />
             </div>
@@ -158,7 +176,7 @@ export function TeaPanel() {
 
         {step === 4 && (
           <>
-            <p>Цай өнгөө гаргасны дараа сүүгээ хийнэ. Давс, бусад орцыг нутаг, айлын заншлаар нэмдэг.</p>
+            <p>Цай улбар шар өнгөө гаргахад сүүгээ хийнэ. Давс, тосыг нутаг, айлын заншлаар нэмдэг.</p>
             <div className="toggles">
               {[
                 { id: 'milk', label: 'Сүү', hint: 'заавал' },
@@ -196,7 +214,7 @@ export function TeaPanel() {
 
         {step === 5 && (
           <>
-            <p>Шанагаар цайгаа утгаж, өндрөөс буцааж цутгана — цай агааржиж, амт нь зөөлөрнө.</p>
+            <p>Шанагаар цайгаа утгаж, өндрөөс буцааж цутгана. Цай агааржиж, амт нь зөөлөрнө. Самрахдаа дээж өргөх санаатай нар зөв утгадаг айл ч бий.</p>
             <div className="meter">
               <div className="meter-fill boil" style={{ width: `${(tea.ladles / 5) * 100}%` }} />
             </div>
@@ -222,38 +240,64 @@ export function TeaPanel() {
 
         {step === 6 && (
           <>
-            <p>Цайгаа аягалъя. Эхний аягыг буюу дээжийг ахмад хүн, эсвэл хойморт барьдаг заншилтай.</p>
+            <p>Цайгаа аягалъя. Хэнд эхэлж барих вэ? Хүндэтгэлийн дарааллаар нь аяга бүрийг барь.</p>
             <div className="cups">
-              {[0, 1, 2].map((i) => (
-                <button
-                  key={i}
-                  className={`cup ${tea.cups > i ? 'full' : ''}`}
-                  disabled={tea.cups !== i}
-                  onClick={() => {
-                    audio.pour();
-                    const cups = tea.cups + 1;
-                    update({ cups });
-                    if (cups >= 3) {
-                      setTimeout(() => {
-                        update({ step: 7 });
-                        useGame.getState().complete('tea', 'serve');
-                      }, 500);
-                    }
-                  }}
-                >
-                  <span className="cup-fill" />
-                  {i === 0 ? 'Дээж' : `${i + 1}-р аяга`}
-                </button>
-              ))}
+              {SERVE_SHOWN.map((who) => {
+                const at = SERVE.findIndex((x) => x.id === who.id);
+                const full = tea.cups > at;
+                return (
+                  <button
+                    key={who.id}
+                    className={`cup ${full ? 'full' : ''}`}
+                    disabled={full}
+                    onClick={() => {
+                      if (at !== tea.cups) {
+                        audio.click();
+                        setMsg(
+                          at === 2
+                            ? 'Өөртөө хамгийн сүүлд аягалдаг. Эхлээд бусдаа хүндэл.'
+                            : 'Эхний аяга буюу дээжийг хойморт залсан ахмад хүнд барьдаг.'
+                        );
+                        return;
+                      }
+                      setMsg(null);
+                      audio.pour();
+                      const cups = tea.cups + 1;
+                      update({ cups });
+                      if (cups >= 3) {
+                        setTimeout(() => {
+                          update({ step: 7 });
+                          useGame.getState().teaServed();
+                        }, 500);
+                      }
+                    }}
+                  >
+                    <span className="cup-fill" />
+                    {who.label}
+                  </button>
+                );
+              })}
             </div>
+            {msg && <p className="tea-msg">{msg}</p>}
           </>
         )}
 
         {step === 7 && (
           <>
-            <p className="tea-done">Халуун сүүтэй цай бэлэн боллоо. Аяга цайгаа баруун гараараа, эсвэл хоёр гараараа барьж өгөөрэй.</p>
+            <p className="tea-done">Халуун сүүтэй цай бэлэн боллоо. Өвөө аягаа хоёр гараараа хүлээн авч, «Ай, сайхан цай чанажээ. Гар чинь ээжийнх шиг уран болж» гэлээ.</p>
+            <p className="note">Нэг домбо цай хадгалагдлаа. Ахмад хүн, зочин ирвэл барина. Усны 1, аргалын 1, сүүний 1 зарцуулагдлаа.</p>
             <div className="row">
-              <button className="ghost" onClick={() => useGame.getState().resetTea()}>
+              <button
+                className="ghost"
+                onClick={() => {
+                  const missing = missingForTea();
+                  if (missing.length) {
+                    useGame.getState().toast('Цай чанах зүйл дутуу', `Хэрэгтэй: ${missing.join(', ')}`);
+                    return;
+                  }
+                  useGame.getState().resetTea();
+                }}
+              >
                 Дахин чанах
               </button>
               <button className="primary" onClick={() => useGame.getState().setModal(null)}>

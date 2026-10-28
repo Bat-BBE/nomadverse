@@ -2,7 +2,7 @@
 import { useMemo, useRef } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
-import { env, stepEnv } from '@/game/tod';
+import { env, stepEnv, TITLE_PRESET } from '@/game/tod';
 import { useGame, world } from '@/game/store';
 
 const skyVert = /* glsl */ `
@@ -66,6 +66,7 @@ void main() {
 
 export function Sky() {
   const tod = useGame((s) => s.tod);
+  const landing = useGame((s) => s.phase === 'title' || s.phase === 'create');
   const scene = useThree((s) => s.scene);
   const skyRef = useRef<THREE.Mesh>(null);
   const starRef = useRef<THREE.Points>(null);
@@ -116,7 +117,7 @@ export function Sky() {
   }, []);
 
   useFrame(({ camera, clock }, dt) => {
-    stepEnv(tod, Math.min(dt, 0.1));
+    stepEnv(landing ? TITLE_PRESET : tod, Math.min(dt, 0.1));
     world.time = clock.elapsedTime;
     skyMat.uniforms.uGlow.value = env.glow;
     skyRef.current?.position.copy(camera.position);

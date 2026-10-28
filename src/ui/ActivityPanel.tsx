@@ -1,30 +1,134 @@
 'use client';
-import { useEffect, useRef, useState } from 'react';
-import { useGame } from '@/game/store';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { motion } from 'framer-motion';
+import { activityXp, bonusFor, starsFor, useGame } from '@/game/store';
 import { ACTIVITIES, type Step } from '@/game/activities';
-import { INFO, ITEMS } from '@/game/content';
+import { INFO, ITEMS, masteryLevel } from '@/game/content';
 import { audio } from '@/game/audio';
+
+/** A mistake lowers the activity's star rating. */
+const miss = () => useGame.getState().miss();
 
 // Plays any activity from game/activities.ts, one step at a time.
 
+/** After a right answer: why it is right, then on to the next step. */
+function Insight({ text, onDone }: { text: string; onDone: () => void }) {
+  useEffect(() => {
+    const k = (e: KeyboardEvent) => {
+      if (e.code === 'Space' || e.code === 'Enter') {
+        e.preventDefault();
+        onDone();
+      }
+    };
+    window.addEventListener('keydown', k);
+    return () => window.removeEventListener('keydown', k);
+  }, [onDone]);
+  return (
+    <motion.div className="insight" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}>
+      <span className="insight-mark">✓</span>
+      <p>{text}</p>
+      <button className="primary" onClick={onDone}>
+        Цааш <small className="key-hint">Space</small>
+      </button>
+    </motion.div>
+  );
+}
+
 function Choice({ step, onDone }: { step: Extract<Step, { kind: 'choice' }>; onDone: () => void }) {
   const [msg, setMsg] = useState<string | null>(null);
+  const [insight, setInsight] = useState<string | null>(null);
+  const [wrong, setWrong] = useState<string[]>([]);
+  if (insight) return <Insight text={insight} onDone={onDone} />;
   return (
     <>
       <div className="choices">
         {step.options.map((o) => (
           <button
             key={o.label}
-            className="choice"
+            className={`choice ${wrong.includes(o.label) ? 'wrong' : ''}`}
+            disabled={wrong.includes(o.label)}
             onClick={() => {
               audio.click();
-              if (o.ok) onDone();
-              else setMsg(o.note ?? 'Өөр арга сонгоод үз.');
+              if (o.ok) {
+                const why = o.after ?? step.after;
+                if (why) setInsight(why);
+                else onDone();
+              } else {
+                miss();
+                setWrong([...wrong, o.label]);
+                setMsg(o.note ?? 'Өөр арга сонгоод үз.');
+              }
             }}
           >
             {o.label}
           </button>
         ))}
+      </div>
+      {msg && <p className="tea-msg">{msg}</p>}
+    </>
+  );
+}
+
+/** Put the shuffled items into their right order by picking them one after another. */
+function Order({ step, onDone }: { step: Extract<Step, { kind: 'order' }>; onDone: () => void }) {
+  const shown = useMemo(() => {
+    // a fixed shuffle that never starts with the right first item
+    const idx = step.items.map((_, i) => i);
+    for (let i = idx.length - 1; i > 0; i--) {
+      const j = (i * 7 + 3) % (i + 1);
+      [idx[i], idx[j]] = [idx[j], idx[i]];
+    }
+    if (idx[0] === 0) idx.push(idx.shift()!);
+    return idx;
+  }, [step]);
+  const [placed, setPlaced] = useState(0);
+  const [shake, setShake] = useState<number | null>(null);
+  const [msg, setMsg] = useState<string | null>(null);
+  if (placed >= step.items.length && step.after) return <Insight text={step.after} onDone={onDone} />;
+  return (
+    <>
+      <ol className="order-slots">
+        {step.items.map((it, i) => (
+          <li key={it} className={i < placed ? 'filled' : i === placed ? 'next' : ''}>
+            <b>{i + 1}</b>
+            {i < placed ? (
+              <motion.span initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }}>
+                {it}
+              </motion.span>
+            ) : (
+              <span className="order-blank" />
+            )}
+          </li>
+        ))}
+      </ol>
+      <div className="choices order-pool">
+        {shown.map((i) =>
+          i < placed ? null : (
+            <motion.button
+              key={step.items[i]}
+              className="choice"
+              animate={shake === i ? { x: [0, -8, 8, -5, 5, 0] } : { x: 0 }}
+              transition={{ duration: 0.35 }}
+              onClick={() => {
+                if (i === placed) {
+                  audio.tick();
+                  setMsg(null);
+                  const n = placed + 1;
+                  setPlaced(n);
+                  if (n >= step.items.length && !step.after) setTimeout(onDone, 400);
+                } else {
+                  miss();
+                  audio.click();
+                  setShake(i);
+                  setTimeout(() => setShake(null), 360);
+                  setMsg(`«${step.items[i]}» арай эрт байна. ${placed + 1}-р алхамд юу хийх ёстойг бод.`);
+                }
+              }}
+            >
+              {step.items[i]}
+            </motion.button>
+          )
+        )}
       </div>
       {msg && <p className="tea-msg">{msg}</p>}
     </>
@@ -54,6 +158,7 @@ function Hold({ step, onDone }: { step: Extract<Step, { kind: 'hold' }>; onDone:
           holding.current = false;
           val.current = 0;
           setV(0);
+          miss();
           setMsg('Хэтэрчихлээ — дахин оролдоё.');
         }
       }
@@ -67,7 +172,10 @@ function Hold({ step, onDone }: { step: Extract<Step, { kind: 'hold' }>; onDone:
     holding.current = false;
     if (step.zone) {
       if (val.current >= step.zone[0] && val.current <= step.zone[1]) onDone();
-      else if (val.current < step.zone[0]) setMsg('Арай бага байна — дахин дарж үргэлжлүүл.');
+      else if (val.current < step.zone[0]) {
+        miss();
+        setMsg('Арай бага байна — дахин дарж үргэлжлүүл.');
+      }
     }
   };
   const press = () => {
@@ -143,6 +251,7 @@ function Alternate({ step, onDone }: { step: Extract<Step, { kind: 'alternate' }
   const hit = (side: 'L' | 'R') => {
     if (n >= step.count || doneRef.current) return;
     if (side === last) {
+      miss();
       setMsg('Ээлжлэн дар!');
       return;
     }
@@ -236,6 +345,7 @@ function Stitch({ step, onDone }: { step: Extract<Step, { kind: 'stitch' }>; onD
       if (kRef.current >= step.count) setTimeout(onDone, 350);
     } else {
       setMiss(true);
+      useGame.getState().miss();
       audio.click();
     }
   };
@@ -268,10 +378,53 @@ function Stitch({ step, onDone }: { step: Extract<Step, { kind: 'stitch' }>; onD
   );
 }
 
+const VERDICT = ['', 'Дадлага хэрэгтэй', 'Сайн байна', 'Онц! Алдаагүй'];
+
+function Stars({ n }: { n: number }) {
+  return (
+    <div className="stars" aria-label={`${n}/3 од`}>
+      {[0, 1, 2].map((i) => (
+        <motion.span
+          key={i}
+          className={i < n ? 'on' : ''}
+          initial={{ scale: 0, rotate: -40, opacity: 0 }}
+          animate={{ scale: 1, rotate: 0, opacity: 1 }}
+          transition={{ delay: 0.25 + i * 0.22, type: 'spring', stiffness: 320, damping: 14 }}
+        >
+          ★
+        </motion.span>
+      ))}
+    </div>
+  );
+}
+
+/** Craft level and how far to the next one. */
+function MasteryBar({ id }: { id: string }) {
+  const m = useGame((s) => s.mastery[id]);
+  const times = m?.times ?? 0;
+  const lv = masteryLevel(times);
+  const prevMin = [0, 1, 3, 6, 10][lv.index];
+  const k = lv.next ? (times - prevMin) / (lv.next.min - prevMin) : 1;
+  return (
+    <div className="mastery">
+      <div className="mastery-head">
+        <span>
+          Ур чадвар: <b>{lv.label}</b>
+        </span>
+        <small>{lv.next ? `${lv.next.label} болоход ${lv.next.min - times} удаа` : 'Дээд түвшин'}</small>
+      </div>
+      <div className="meter thin">
+        <motion.div className="meter-fill gold" initial={{ width: 0 }} animate={{ width: `${k * 100}%` }} transition={{ delay: 0.9, duration: 0.8 }} />
+      </div>
+    </div>
+  );
+}
+
 export function ActivityPanel() {
   const activity = useGame((s) => s.activity);
   const next = useGame((s) => s.activityNext);
   const cancel = useGame((s) => s.cancelActivity);
+  const misses = useGame((s) => s.misses);
   if (!activity) return null;
   const def = ACTIVITIES[activity.id];
   const finished = activity.step >= def.steps.length;
@@ -290,6 +443,8 @@ export function ActivityPanel() {
       <div className="tea-body">
         {finished ? (
           <>
+            <Stars n={starsFor(misses)} />
+            <p className="verdict">{VERDICT[starsFor(misses)]}</p>
             <p className="tea-done">{def.outro}</p>
             <div className="reward-row">
               {Object.entries(def.gives).map(([k, n]) => (
@@ -298,8 +453,20 @@ export function ActivityPanel() {
                   {ITEMS[k]?.name} ×{n}
                 </span>
               ))}
-              <span className="reward xp">+{def.xp} XP</span>
+              {Object.entries(bonusFor(def.id, starsFor(misses))).map(([k, n]) => (
+                <span key={`b${k}`} className="reward bonus">
+                  <i style={{ background: ITEMS[k]?.color }} />
+                  Онцын шагнал: {ITEMS[k]?.name} +{n}
+                </span>
+              ))}
+              <span className="reward xp">+{activityXp(def.xp, starsFor(misses))} XP</span>
             </div>
+            <div className="meaning">
+              <div className="eyebrow">Цаад утга</div>
+              <p>{def.meaning}</p>
+              {def.blessing && <p className="blessing">«{def.blessing}»</p>}
+            </div>
+            <MasteryBar id={def.id} />
             <div className="row">
               {def.knowledge.map((id) => (
                 <button key={id} className="ghost" onClick={() => useGame.getState().setModal({ type: 'info', id })}>
@@ -323,6 +490,7 @@ export function ActivityPanel() {
             {step.kind === 'alternate' && <Alternate key={activity.step} step={step} onDone={next} />}
             {step.kind === 'wait' && <Wait key={activity.step} step={step} onDone={next} />}
             {step.kind === 'stitch' && <Stitch key={activity.step} step={step} onDone={next} />}
+            {step.kind === 'order' && <Order key={activity.step} step={step} onDone={next} />}
             <div className="row">
               <button className="ghost" onClick={cancel}>
                 Болих
